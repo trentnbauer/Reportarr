@@ -100,6 +100,10 @@ media.example.com {
 
 If your proxy does not strip the prefix (for example `reverse_proxy /reportarr/* reportarr:8080` in Caddy), that works too; set `BASE_URL=https://media.example.com/reportarr`. The login, if you set one, is HTTP basic auth, which proxies pass through unchanged. Keep it behind TLS.
 
+### Test buttons
+
+Each integration in the settings has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr instance, every download client, and the default qBittorrent and SABnzbd. It checks the values currently in the form, so you can test before saving, and a blank secret uses the one you saved. A check makes the same kind of call the app makes (for example it confirms the Plex token can read reports, that an address really is Sonarr and not Radarr, and that the SABnzbd key is the full one) and times out after 10 seconds. Results never show keys or passwords. A test only reads; it never changes anything in the service.
+
 ### Moving UI settings into compose
 
 Once you have configured things in the web UI, **Download .env** (below the Save button, shown when you have saved settings in the UI) downloads your settings as `reportarr.env` (browsers drop the leading dot, so rename it to `.env`): numbered `SONARR_N_*` and `RADARR_N_*` instances, `PLEX_KEY`, Overseerr, queue settings and so on. It contains your API keys and passwords, so keep it private and never commit it. Put it next to `docker-compose.yml` and restart; from then on the settings come from the file and show as read-only in the UI. `UI_USERNAME` and `UI_PASSWORD` are never stored by the UI, so they are left blank in the file for you to fill in.

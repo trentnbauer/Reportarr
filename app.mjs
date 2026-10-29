@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { runCheck, PLEX_COMMUNITY_URL } from './checks.mjs';
 import { DATA_DIR, getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
 
 export const ratingKeyOf = (url) => url?.match(/\/library\/metadata\/(\d+)$/)?.[1];
@@ -47,7 +48,7 @@ const arr = async (a, method, p, body) => {
   return text ? JSON.parse(text) : null;
 };
 const reports = async (c) => {
-  const r = await fetch('https://community.plex.tv/api', {
+  const r = await fetch(PLEX_COMMUNITY_URL(), {
     method: 'POST',
     headers: { 'X-Plex-Token': c.plexToken, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: '{ reports(first: 50) { nodes { id date url } } }' }),
@@ -334,7 +335,7 @@ export function serve() {
       // /reportarr -> /reportarr/ so the page's relative URLs resolve; a proxy that strips the prefix never sends this
       if (prefix && url.pathname === prefix) { res.writeHead(308, { Location: prefix + '/' + url.search }); return res.end(); }
       // Route on the /api/... suffix, so it works under any prefix whether or not the proxy strips it.
-      const route = url.pathname.match(/\/api\/(state|env|config|historic)$/)?.[0].slice(5) ?? '';
+      const route = url.pathname.match(/\/api\/(state|env|config|historic|test)$/)?.[0].slice(5) ?? '';
       if (route === 'state') {
         return send(200, 'application/json', JSON.stringify({
           config: publicConfig(), locked: lockedKeys(), status, version: VERSION, uiConfigured: hasFileConfig(), authEnabled: !!pass,
@@ -346,10 +347,11 @@ export function serve() {
         res.setHeader('Cache-Control', 'no-store');
         return send(200, 'text/plain; charset=utf-8', envFile());
       }
-      if (req.method === 'POST' && (route === 'config' || route === 'historic')) {
+      if (req.method === 'POST' && (route === 'config' || route === 'historic' || route === 'test')) {
         // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
         if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return send(415, 'application/json', '{"error":"content-type must be application/json"}');
         if (req.headers.origin && !sameOrigin(req, baseHost)) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
+        if (route === 'test') return send(200, 'application/json', JSON.stringify(await runCheck(getConfig(), JSON.parse(await body(req)))));
         if (route === 'historic') { historicRequested = true; wake?.(); return send(202, 'application/json', '{}'); }
         saveConfig(JSON.parse(await body(req)));
         return send(200, 'application/json', '{}');

@@ -29,6 +29,8 @@
   a.btn { display:inline-block; padding:8px 14px; border:1px solid var(--line); border-radius:6px; color:var(--fg); font-weight:600; text-decoration:none; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
   .client { display:grid; grid-template-columns:1fr 120px 2fr 1fr 1fr 1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
+  .tests { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .rowtest { grid-column:1 / -1; font-size:13px; margin:-4px 0 4px; }
   .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
   @media (max-width:700px) { .arr, .client { grid-template-columns:1fr 1fr; } }
 </style>
@@ -50,6 +52,13 @@ try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light'
 <form id="form" class="card">
   <p class="muted">Fields marked <span class="badge">env</span> are set in the container environment and can only be changed there. Secrets are never shown; leave blank to keep the current value.</p>
   <div class="grid" id="fields"></div>
+  <p class="tests">
+    <button type="button" class="ghost" data-test="plex">Test Plex</button>
+    <button type="button" class="ghost" data-test="overseerr">Test Overseerr</button>
+    <button type="button" class="ghost" data-test="qbit">Test qBittorrent (default)</button>
+    <button type="button" class="ghost" data-test="sab">Test SABnzbd (default)</button>
+    <span id="testresult" class="muted" role="status"></span>
+  </p>
   <h3>Sonarr / Radarr instances <span id="arrlock"></span></h3>
   <div id="arrs"></div>
   <button type="button" class="ghost" id="addarr">Add instance</button>
@@ -140,7 +149,8 @@ function renderArrs() {
     <label>Kind<select data-i="${i}" data-k="kind" ${lock ? 'disabled' : ''}><option ${a.kind === 'sonarr' ? 'selected' : ''}>sonarr</option><option ${a.kind === 'radarr' ? 'selected' : ''}>radarr</option></select></label>
     <label>URL (include base path)<input data-i="${i}" data-k="url" value="${esc(a.url)}" ${lock ? 'disabled' : ''}></label>
     <label>API key<input type="password" data-i="${i}" data-k="key" placeholder="${a.keySet ? '(set)' : ''}" ${lock ? 'disabled' : ''}></label>
-    ${lock ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}</div>`).join('');
+    ${lock ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}
+    <div class="rowtest"><button type="button" class="ghost" data-test="arr" data-i="${i}">Test</button> <span class="muted" data-result="arr${i}" role="status"></span></div></div>`).join('');
 }
 
 function renderClients() {
@@ -155,10 +165,32 @@ function renderClients() {
     <label>Username<input data-c="${i}" data-k="username" value="${esc(x.username)}" ${d}></label>
     <label>Password<input type="password" data-c="${i}" data-k="password" placeholder="${x.passwordSet ? '(set)' : ''}" ${d}></label>
     <label>API key<input type="password" data-c="${i}" data-k="apiKey" placeholder="${x.apiKeySet ? '(set)' : ''}" ${d}></label>
-    ${lock ? '' : `<button type="button" class="ghost" data-delc="${i}">Remove</button>`}</div>`).join('');
+    ${lock ? '' : `<button type="button" class="ghost" data-delc="${i}">Remove</button>`}
+    <div class="rowtest"><button type="button" class="ghost" data-test="client" data-c="${i}">Test</button> <span class="muted" data-result="client${i}" role="status"></span></div></div>`).join('');
 }
 document.getElementById('clients').addEventListener('input', (e) => { const { c, k } = e.target.dataset; if (c !== undefined) clients[c][k] = e.target.value; });
 document.getElementById('clients').addEventListener('click', (e) => { if (e.target.dataset.delc !== undefined) { clients.splice(+e.target.dataset.delc, 1); renderClients(); } });
+// Test buttons send what is in the form right now (so you can test before saving); blank secrets use the saved ones.
+const val = (name) => { const el = document.querySelector(`#form [name=${name}]`); return el ? el.value : ''; };
+async function runTest(btn) {
+  const t = btn.dataset.test;
+  let req, out;
+  if (t === 'plex') { req = { target: 'plex', plexUrl: val('plexUrl'), plexToken: val('plexToken') }; out = document.getElementById('testresult'); }
+  else if (t === 'overseerr') { req = { target: 'overseerr', overseerrUrl: val('overseerrUrl'), overseerrKey: val('overseerrKey') }; out = document.getElementById('testresult'); }
+  else if (t === 'qbit') { req = { target: 'client', kind: 'qbittorrent', name: '', url: val('qbitUrl'), username: val('qbitUsername'), password: val('qbitPassword') }; out = document.getElementById('testresult'); }
+  else if (t === 'sab') { req = { target: 'client', kind: 'sabnzbd', name: '', url: val('sabUrl'), apiKey: val('sabApiKey') }; out = document.getElementById('testresult'); }
+  else if (t === 'arr') { const { name, kind, url, key } = arrs[btn.dataset.i]; req = { target: 'arr', name, kind, url, key }; out = document.querySelector(`[data-result="arr${btn.dataset.i}"]`); }
+  else { const { name, kind, url, username, password, apiKey } = clients[btn.dataset.c]; req = { target: 'client', name, kind, url, username, password, apiKey }; out = document.querySelector(`[data-result="client${btn.dataset.c}"]`); }
+  document.querySelectorAll('#testresult, [data-result]').forEach((el) => { if (el !== out) el.textContent = ''; });
+  out.className = 'muted'; out.textContent = 'Testing...'; btn.disabled = true;
+  try {
+    const r = await (await fetch(api('test'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req) })).json();
+    out.className = r.ok ? 'ok' : 'error'; out.textContent = (r.ok ? 'OK: ' : 'Failed: ') + r.message;
+  } catch (e) { out.className = 'error'; out.textContent = 'Failed: could not reach Reportarr'; }
+  btn.disabled = false;
+}
+document.getElementById('form').addEventListener('click', (e) => { if (e.target.dataset.test) runTest(e.target); });
+
 document.getElementById('historicbtn').onclick = async () => {
   const n = state.status.historic, live = !state.config.dryRun;
   if (live && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (up to your daily limit of ${state.config.maxPerDay}). Continue?`)) return;
