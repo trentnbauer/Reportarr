@@ -1,4 +1,8 @@
 // Small helpers shared by the core and the integrations.
+import fs from 'node:fs';
+
+// write to a temp file and rename over the old one, so a crash mid-write never leaves a half-written file
+export const writeFileAtomic = (f, data, opts) => { fs.writeFileSync(f + '.tmp', data, opts); fs.renameSync(f + '.tmp', f); };
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref()); // unref: a pending wait must not keep the process alive
 export const log = (...a) => console.log(new Date().toISOString(), ...a);
 export const trim = (u) => String(u ?? '').trim().replace(/\/+$/, '');
@@ -11,7 +15,10 @@ export const envNumbers = (e, K) => [...new Set(Object.keys(e).map((k) => k.matc
 
 // Connection checks (the Test buttons): a short timeout, readable failures, and never a secret in a message.
 export const TIMEOUT_MS = 10_000;
-export const get = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(TIMEOUT_MS) });
+export const get = (url, opts = {}, ms = TIMEOUT_MS) => fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
+// the real work (listing a whole library can be slow): longer, but a server that never answers still can't stall the poll loop
+export const WORK_TIMEOUT_MS = 60_000;
+export const work = (url, opts) => get(url, opts, WORK_TIMEOUT_MS);
 export const why = (e) => (e.name === 'TimeoutError' ? `no answer within ${TIMEOUT_MS / 1000}s` : (e.cause?.code ?? e.message));
 export const refused = (status, what) => (status === 401 || status === 403 ? `${what} was refused (HTTP ${status})` : `HTTP ${status}`);
 export const pass = (message) => ({ ok: true, message });

@@ -1,5 +1,5 @@
 // qBittorrent: a download client. Used to move a replacement to the top of the queue.
-import { trim, get, refused, pass, fail, need } from '../util.mjs';
+import { trim, get, work, refused, pass, fail, need } from '../util.mjs';
 
 const qbittorrent = {
   kind: 'qbittorrent', label: 'qBittorrent', prefix: 'qbit', defaultUrl: 'http://qbittorrent:8080', implementation: 'QBittorrent',
@@ -33,9 +33,9 @@ const qbittorrent = {
   async prioritize(dc, q) {
     if (!dc.password) throw new Error(`qBittorrent password for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set QBIT_PASSWORD`);
     const body = new URLSearchParams({ username: dc.username, password: dc.password });
-    const cookie = (await fetch(`${dc.url}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
+    const cookie = (await work(`${dc.url}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
     if (!cookie) throw new Error(`qBittorrent login failed at ${dc.url}`);
-    const r = await fetch(`${dc.url}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
+    const r = await work(`${dc.url}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
     if (!r.ok) throw new Error(`qBittorrent topPrio ${r.status}`); // 409 = torrent queueing disabled
   },
 };

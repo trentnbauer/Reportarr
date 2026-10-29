@@ -19,7 +19,7 @@ const lidarr = {
 
   plan: ({ albumId }) => ({
     hist: `/history?albumId=${albumId}&eventType=1&pageSize=1&sortKey=date&sortDirection=descending`,
-    del: (id) => `/trackfile/${id}`, cmd: { name: 'AlbumSearch', albumIds: [albumId] }, ours: (r) => r.albumId === albumId,
+    del: (id) => `/trackfile/${id}`, cmd: { name: 'AlbumSearch', albumIds: [albumId] }, match: { albumId },
   }),
 };
 export default lidarr;

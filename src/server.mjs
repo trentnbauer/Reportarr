@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
 import { kindsMeta } from './integrations/index.mjs';
-import { status, health, todayCount, currentHealth, readJson, changesFile, requestHistoric } from './engine.mjs';
+import { status, health, todayCount, currentHealth, readJson, changesFile, requestHistoric, requestRetry } from './engine.mjs';
 import { VERSION, log } from './util.mjs';
 
 // BASE_URL is the path the app is served under behind a reverse proxy: "/reportarr", or the full public URL
@@ -26,6 +26,14 @@ const sameOrigin = (req, baseHost) => {
   let host; try { host = new URL(req.headers.origin).host; } catch { return false; }
   const fwd = (req.headers['x-forwarded-host'] ?? '').split(',')[0].trim();
   return [req.headers.host, fwd, baseHost].filter(Boolean).includes(host);
+};
+
+// Without a password, a page on any website could reach the UI through DNS rebinding (its own domain pointed at this
+// server's address) and read every key. So, with no login, only accept addresses such a page can't use: an IP, localhost,
+// a LAN name (no dot, or .local/.lan/.home.arpa/.internal), or the host in BASE_URL.
+export const localHost = (req, baseHost) => {
+  let h; try { h = new URL(`http://${req.headers.host ?? ''}`).hostname; } catch { return false; }
+  return /^[\d.]+$|^\[[\da-f:.]+\]$|^[^.]+$|\.(local|lan|home\.arpa|internal)$/i.test(h) || (!!baseHost && h === new URL(`http://${baseHost}`).hostname);
 };
 
 const sha = (v) => crypto.createHash('sha256').update(v).digest();
@@ -55,6 +63,7 @@ export function serve() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+    if (!pass && !localHost(req, baseHost)) return send(403, 'text/plain', 'Refused: without UI_PASSWORD Reportarr only answers on an IP address or a LAN name. Set UI_PASSWORD, or put this address in BASE_URL.');
     if (!authed(req)) {
       res.setHeader('WWW-Authenticate', 'Basic realm="Reportarr"');
       return send(401, 'text/plain', 'auth required');
@@ -64,7 +73,7 @@ export function serve() {
       // /reportarr -> /reportarr/ so the page's relative URLs resolve; a proxy that strips the prefix never sends this
       if (prefix && url.pathname === prefix) { res.writeHead(308, { Location: prefix + '/' + url.search }); return res.end(); }
       // Route on the /api/... suffix, so it works under any prefix whether or not the proxy strips it.
-      const route = url.pathname.match(/\/api\/(state|env|config|historic|test)$/)?.[0].slice(5) ?? '';
+      const route = url.pathname.match(/\/api\/(state|env|config|historic|test|retry)$/)?.[0].slice(5) ?? '';
       if (route === 'state') {
         const c = getConfig();
         return send(200, 'application/json', JSON.stringify({
@@ -78,7 +87,7 @@ export function serve() {
         res.setHeader('Cache-Control', 'no-store');
         return send(200, 'text/plain; charset=utf-8', envFile());
       }
-      if (req.method === 'POST' && ['config', 'historic', 'test'].includes(route)) {
+      if (req.method === 'POST' && ['config', 'historic', 'test', 'retry'].includes(route)) {
         // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
         if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return send(415, 'application/json', '{"error":"content-type must be application/json"}');
         if (req.headers.origin && !sameOrigin(req, baseHost)) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
@@ -89,6 +98,7 @@ export function serve() {
           return send(200, 'application/json', JSON.stringify(result));
         }
         if (route === 'historic') { requestHistoric(); return send(202, 'application/json', '{}'); }
+        if (route === 'retry') { requestRetry(String(JSON.parse(await body(req)).id)); return send(202, 'application/json', '{}'); }
         saveConfig(JSON.parse(await body(req)));
         return send(200, 'application/json', '{}');
       }

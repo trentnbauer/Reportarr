@@ -26,7 +26,7 @@ const radarr = {
 
   plan: ({ movie }) => ({
     hist: `/history/movie?movieId=${movie.id}&eventType=1`,
-    del: (id) => `/moviefile/${id}`, cmd: { name: 'MoviesSearch', movieIds: [movie.id] }, ours: (r) => r.movieId === movie.id,
+    del: (id) => `/moviefile/${id}`, cmd: { name: 'MoviesSearch', movieIds: [movie.id] }, match: { movieId: movie.id },
   }),
 };
 export default radarr;

@@ -1,5 +1,5 @@
 // SABnzbd: a download client. Used to move a replacement to the top of the queue.
-import { trim, get, pass, fail, need } from '../util.mjs';
+import { trim, get, work, pass, fail, need } from '../util.mjs';
 
 const sabnzbd = {
   kind: 'sabnzbd', label: 'SABnzbd', prefix: 'sab', defaultUrl: 'http://sabnzbd:8080', implementation: 'Sabnzbd',
@@ -30,7 +30,7 @@ const sabnzbd = {
   // Move a download to the top of the queue (position 0).
   async prioritize(dc, q) {
     if (!dc.apiKey) throw new Error(`SABnzbd API key for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set SAB_API_KEY`);
-    const r = await fetch(`${dc.url}/api?mode=switch&value=${q.downloadId}&value2=0&output=json&apikey=${encodeURIComponent(dc.apiKey)}`);
+    const r = await work(`${dc.url}/api?mode=switch&value=${encodeURIComponent(q.downloadId)}&value2=0&output=json&apikey=${encodeURIComponent(dc.apiKey)}`);
     if (!r.ok) throw new Error(`sabnzbd switch ${r.status}`);
   },
 };

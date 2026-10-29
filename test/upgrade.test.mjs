@@ -55,7 +55,7 @@ test('a report that arrives after the upgrade is handled normally', async () => 
   await poll();
   const last = changes().at(-1);
   assert.deepEqual([last.status, last.reportId, last.source, last.instance], ['dry-run', 'after-upgrade', 'Plex report', 'radarr']);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')).count, 5);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')).count, 4, 'a dry run does not use up the daily cap');
 });
 
 test.after(() => { for (const s of [community, plex, seerr, radarr]) s.close(); });

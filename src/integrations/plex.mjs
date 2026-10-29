@@ -1,7 +1,7 @@
 // Plex: a report source. Users press "Report an issue" in Plex; Reportarr reads those reports from plex.tv and
 // replaces the reported file. Everything Plex-specific lives here.
 import path from 'node:path';
-import { trim, get, why, refused, pass, fail, need, envNumbers, TIMEOUT_MS } from '../util.mjs';
+import { trim, get, work, why, refused, pass, fail, need, envNumbers, TIMEOUT_MS } from '../util.mjs';
 
 // plex.tv's community API is where "Reported Issues" live (the same data the Plex web app shows)
 export const COMMUNITY_URL = () => process.env.PLEX_COMMUNITY_URL || 'https://community.plex.tv/api';
@@ -11,14 +11,14 @@ export const idsOf = (guids = []) => Object.fromEntries(guids.map((g) => g.id.sp
 
 // a call to the Plex server itself
 export const plexApi = async (src, p) => {
-  const r = await fetch(src.url + p, { headers: { 'X-Plex-Token': src.key, Accept: 'application/json' } });
+  const r = await work(src.url + p, { headers: { 'X-Plex-Token': src.key, Accept: 'application/json' } });
   if (r.status === 404) return {}; // item already deleted or replaced
   if (!r.ok) throw new Error(`plex ${p} ${r.status}`);
   return (await r.json()).MediaContainer;
 };
 
 const communityReports = async (src) => {
-  const r = await fetch(COMMUNITY_URL(), {
+  const r = await work(COMMUNITY_URL(), {
     method: 'POST',
     headers: { 'X-Plex-Token': src.key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: '{ reports(first: 50) { nodes { id date url } } }' }),

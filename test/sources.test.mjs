@@ -31,8 +31,10 @@ const plexA = await plexServer('machine-a', { 10: movie('Alpha', 1, 'Alpha.mkv')
 const plexB = await plexServer('machine-b', { 20: movie('Beta', 2, 'Beta.mkv') });
 const plexC = await plexServer('machine-c', { 30: movie('Gamma', 3, 'Gamma.mkv') });
 
+let failDelete = false;
 const radarr = await listen((req, res) => {
   const u = new URL(req.url, 'http://x'); calls.push(`radarr ${req.method} ${u.pathname}${u.search}`);
+  if (failDelete && req.method === 'DELETE') return res.writeHead(500).end();
   if (u.pathname === '/api/v3/movie') { const n = u.searchParams.get('tmdbId'); return json(res, ['1', '2', '3'].includes(n) ? [{ id: +n, title: `movie ${n}`, hasFile: true, movieFile: { id: 50 + +n, path: `/movies/${{ 1: 'Alpha', 2: 'Beta', 3: 'Gamma' }[n]}.mkv` } }] : []); }
   if (u.pathname === '/api/v3/queue') return json(res, { records: [] });
   json(res, []);
@@ -48,7 +50,7 @@ let issues1 = [], issues2 = [];
 const seerr1 = await seerr(T.os1, issues1);
 const seerr2 = await seerr(T.os2, issues2);
 
-const { poll } = await import('../src/engine.mjs');
+const { poll, status, requestHistoric, requestRetry } = await import('../src/engine.mjs');
 const { serve } = await import('../src/server.mjs');
 const { saveConfig } = await import('../src/config.mjs');
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
@@ -96,7 +98,7 @@ test('today\'s count and the limit are reported, and the count resets on a new d
   const stateFile = path.join(process.env.DATA_DIR, 'state.json');
   const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   assert.deepEqual(await get(), { count: st.count, max: 20 });
-  assert.ok(st.count >= 3, 'the three replacements above count');
+  assert.equal(st.count, 0, 'the dry runs above do not use up the daily cap');
   fs.writeFileSync(stateFile, JSON.stringify({ ...st, day: '2000-01-01', count: 99 }));
   assert.deepEqual(await get(), { count: 0, max: 20 });
   s.close();
@@ -111,6 +113,40 @@ test('two Overseerr instances can both have an issue #5; the first keeps the old
   await poll();
   const rows = changes().slice(before).filter((r) => r.status === 'dry-run');
   assert.deepEqual(rows.map((r) => [r.reportId, r.source]), [['overseerr:5', 'Overseerr issue #5 · video'], ['overseerr:seerr-2:5', 'seerr-2 issue #5 · video']]);
+});
+
+test('live: the cap counts real replacements and delays (never drops) new reports; the baseline survives a lost log; a failed report can be retried', async () => {
+  const stateFile = path.join(process.env.DATA_DIR, 'state.json'), st = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  const lose = () => fs.writeFileSync(path.join(process.env.DATA_DIR, 'changes.json'), '[]'); // the log rolls over, or is lost
+  const newDay = () => fs.writeFileSync(stateFile, JSON.stringify({ ...st(), day: '2000-01-01' }));
+  const replaced = () => changes().filter((r) => r.status === 'replaced').map((r) => r.reportId);
+  saveConfig({ dryRun: false, maxPerDay: 1, sources: [{ name: 'plex', kind: 'plex', url: url(plexA), key: T.acct }] });
+  reports[T.acct].push(report('cap-1', 'machine-a', 10, '2026-10-30T01:00'), report('cap-2', 'machine-a', 10, '2026-10-30T02:00'));
+  lose(); newDay(); await poll();
+  assert.deepEqual(replaced(), ['cap-1']);
+  assert.match(changes().at(-1).detail, /daily cap 1 reached; 1 new report\(s\) wait until tomorrow/);
+  assert.ok(!st().seen.includes('cap-2'), 'the second report waits');
+  lose(); newDay(); await poll();
+  assert.deepEqual(replaced(), ['cap-2'], 'and is handled when the cap resets');
+
+  // old-a was open on day one; losing the log must neither hide it nor bring back reports already handled
+  lose(); await poll();
+  assert.equal(status.historic, 1);
+  saveConfig({ maxPerDay: 5 }); requestHistoric(); await poll();
+  assert.deepEqual(replaced(), ['old-a']);
+  lose(); await poll();
+  assert.equal(status.historic, 0, 'a replaced report never counts as historic again');
+
+  failDelete = true; reports[T.acct].push(report('flaky', 'machine-a', 10, '2026-10-30T03:00'));
+  lose(); await poll();
+  const failed = changes().find((r) => r.status === 'error');
+  assert.deepEqual([failed.reportId, failed.retry], ['flaky', 'report']);
+  failDelete = false; requestRetry(failed.id); await poll();
+  assert.deepEqual(replaced(), ['flaky']);
+  assert.equal(changes().find((r) => r.id === failed.id).retried, true, 'the button goes away');
+  requestRetry(failed.id); await poll();
+  assert.deepEqual(replaced(), ['flaky'], 'a row is only retried once');
+  saveConfig({ dryRun: true });
 });
 
 test.after(() => { for (const s of [community, plexA, plexB, plexC, radarr, seerr1, seerr2]) s.close(); });

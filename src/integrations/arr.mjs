@@ -1,9 +1,9 @@
 // What Sonarr, Radarr and Lidarr have in common: the same request style, the same settings, the same connection test.
 // What differs (how a reported file is found, how it is replaced) lives in sonarr.mjs, radarr.mjs and lidarr.mjs.
-import { trim, get, refused, pass, fail, need } from '../util.mjs';
+import { trim, get, work, refused, pass, fail, need } from '../util.mjs';
 
 export async function request(version, a, method, p, body) {
-  const r = await fetch(`${a.url}/api/${version}${p}`, {
+  const r = await work(`${a.url}/api/${version}${p}`, {
     method,
     headers: { 'X-Api-Key': a.key, 'Content-Type': 'application/json' },
     body: body && JSON.stringify(body),

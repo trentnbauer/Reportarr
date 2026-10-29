@@ -101,6 +101,7 @@
   .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
   .item .t b { font-size:14px; }
   .item .t span, .item .d { font-size:13px; color:var(--muted); }
+  .item .body .btn { align-self:flex-start; margin-top:6px; }
   .item .t span { font-size:12px; }
   .item code { color:var(--fg); background:var(--card); padding:0 5px; border-radius:4px; }
   .item .when { flex:0 0 110px; text-align:right; font-size:13px; color:var(--muted); margin-left:auto; }
@@ -280,11 +281,18 @@ function paintActivity() {
     const k = statusKind(r), label = STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1));
     return `<div class="item"><span class="st"><span class="status s-${k}"><i></i>${esc(label)}</span></span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
-      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${esc(r.detail)}</div></div>
+      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${esc(r.detail)}</div>${r.retry && r.id && !r.retried ? `<button type="button" class="btn" data-retry="${esc(r.id)}">${r.retry === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : ''}</div>
       <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`;
   }).join('');
   $('empty').classList.toggle('hidden', rows.length > 0);
 }
+$('rows').onclick = async (e) => {
+  const b = e.target.closest('[data-retry]'); if (!b) return;
+  if (!state.config.dryRun && b.textContent === 'Retry' && !confirm('This runs the report again, which can delete and re-download its file. Continue?')) return;
+  b.disabled = true; b.textContent = 'Retrying…';
+  const r = await fetch(api('retry'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.retry }) }).catch(() => null);
+  b.textContent = r?.ok ? 'Retrying · see table' : 'Failed to start';
+};
 $('filters').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; paintActivity(); } };
 $('historicbtn').onclick = async () => {
   const n = state.status.historic;
@@ -362,7 +370,7 @@ function paintSave() {
   m.style.color = dirty ? 'var(--acctext)' : saveErr ? 'var(--bad)' : saveMsg ? 'var(--ok)' : 'var(--muted)';
 }
 function paintDots() { // after a refresh, update dots and tab alerts without touching the form
-  document.querySelectorAll('[data-dot]').forEach((el) => { const [list, name, id] = el.dataset.dot.split(':'); const x = find(list, id); if (x) el.className = 'dot ' + cardDot(list, x); });
+  document.querySelectorAll('[data-dot]').forEach((el) => { const p = el.dataset.dot.split(':'), list = p[0], x = find(list, p.at(-1)); if (x) el.className = 'dot ' + cardDot(list, x); });
   paintHeader();
 }
 
