@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reportarr</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1e23; --muted:#6b7280; --card:#f4f5f7; --line:#d9dce1; --accent:#b8780a; --bad:#b42318; --ok:#157f3b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --accent:#e5a00d; --bad:#f97066; --ok:#4ade80; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
+  h1 { font-size:20px; } h2 { font-size:16px; margin:28px 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .error { color:var(--bad); } .ok { color:var(--ok); }
+  .table { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
+  label { display:block; font-size:13px; color:var(--muted); }
+  input, select { width:100%; padding:7px 9px; margin-top:3px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
+  input[type=checkbox] { width:auto; margin-right:6px; }
+  input:disabled { opacity:.6; }
+  button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#111; font:inherit; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
+  @media (max-width:700px) { .arr { grid-template-columns:1fr 1fr; } }
+</style>
+</head>
+<body>
+<h1>Reportarr</h1>
+<div id="status" class="card"></div>
+
+<h2>Changes</h2>
+<div class="card table"><table id="changes"></table></div>
+
+<h2>Settings</h2>
+<form id="form" class="card">
+  <p class="muted">Fields marked <span class="badge">env</span> are set in the container environment and can only be changed there. Secrets are never shown; leave blank to keep the current value.</p>
+  <div class="grid" id="fields"></div>
+  <h3>Sonarr / Radarr instances <span id="arrlock"></span></h3>
+  <div id="arrs"></div>
+  <button type="button" class="ghost" id="addarr">Add instance</button>
+  <p><button type="submit">Save</button> <span id="msg" class="muted"></span></p>
+</form>
+
+<script>
+const FIELDS = [
+  ['plexUrl', 'Plex URL', 'text'], ['plexToken', 'Plex token', 'password'],
+  ['pollSeconds', 'Poll interval (seconds)', 'number'], ['maxPerDay', 'Max replacements per day', 'number'],
+  ['dryRun', 'Dry run (log only, never delete)', 'checkbox'],
+  ['qbitUrl', 'qBittorrent URL (override)', 'text'], ['qbitUsername', 'qBittorrent username (override)', 'text'],
+  ['qbitPassword', 'qBittorrent password (override)', 'password'],
+  ['sabUrl', 'SABnzbd URL (override)', 'text'], ['sabApiKey', 'SABnzbd API key (override)', 'password'],
+];
+let state, arrs = [];
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function renderLog() {
+  const { config: c, status, changes } = state;
+  document.getElementById('status').innerHTML =
+    `<span class="badge">${c.dryRun ? 'DRY RUN' : 'LIVE'}</span> last poll: ${esc(status.lastPoll ?? 'never')}` +
+    (status.lastError ? ` <span class="error">· ${esc(status.lastError)}</span>` : ' <span class="ok">· ok</span>');
+  document.getElementById('changes').innerHTML = changes.length
+    ? '<tr><th>Time</th><th>Status</th><th>Title</th><th>Instance</th><th>Detail</th></tr>' +
+      changes.map((r) => `<tr><td>${esc(new Date(r.time).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.title)}</td><td>${esc(r.instance)}</td><td>${esc(r.detail)}</td></tr>`).join('')
+    : '<tr><td class="muted">Nothing yet. Only new Plex reports are acted on.</td></tr>';
+}
+
+function render() {
+  renderLog();
+  const { config: c, locked } = state;
+  document.getElementById('fields').innerHTML = FIELDS.map(([k, label, type]) => {
+    const lock = locked.includes(k), set = c[k + 'Set'];
+    const attrs = type === 'checkbox' ? (c[k] ? 'checked' : '') : `value="${esc(c[k])}"`;
+    const ph = type === 'password' ? ` placeholder="${set ? '(set)' : ''}"` : '';
+    return `<label>${type === 'checkbox' ? `<input type="checkbox" name="${k}" ${attrs} ${lock ? 'disabled' : ''}>${label}`
+      : `${label}${lock ? ' <span class="badge">env</span>' : ''}<input type="${type}" name="${k}" ${attrs}${ph} ${lock ? 'disabled' : ''}>`}</label>`;
+  }).join('');
+  arrs = c.arrs.map((a) => ({ ...a }));
+  renderArrs();
+}
+
+function renderArrs() {
+  const lock = state.locked.includes('arrs');
+  document.getElementById('arrlock').innerHTML = lock ? '<span class="badge">env</span>' : '';
+  document.getElementById('addarr').hidden = lock;
+  document.getElementById('arrs').innerHTML = arrs.map((a, i) => `<div class="arr">
+    <label>Name<input data-i="${i}" data-k="name" value="${esc(a.name)}" ${lock ? 'disabled' : ''}></label>
+    <label>Kind<select data-i="${i}" data-k="kind" ${lock ? 'disabled' : ''}><option ${a.kind === 'sonarr' ? 'selected' : ''}>sonarr</option><option ${a.kind === 'radarr' ? 'selected' : ''}>radarr</option></select></label>
+    <label>URL (include base path)<input data-i="${i}" data-k="url" value="${esc(a.url)}" ${lock ? 'disabled' : ''}></label>
+    <label>API key<input type="password" data-i="${i}" data-k="key" placeholder="${a.keySet ? '(set)' : ''}" ${lock ? 'disabled' : ''}></label>
+    ${lock ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}</div>`).join('');
+}
+
+document.getElementById('arrs').addEventListener('input', (e) => { const { i, k } = e.target.dataset; if (i !== undefined) arrs[i][k] = e.target.value; });
+document.getElementById('arrs').addEventListener('click', (e) => { if (e.target.dataset.del !== undefined) { arrs.splice(+e.target.dataset.del, 1); renderArrs(); } });
+document.getElementById('addarr').onclick = () => { arrs.push({ name: '', kind: 'sonarr', url: 'http://', key: '' }); renderArrs(); };
+
+document.getElementById('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const patch = {};
+  for (const [k, , type] of FIELDS) {
+    const el = e.target.elements[k];
+    if (el.disabled) continue;
+    patch[k] = type === 'checkbox' ? el.checked : type === 'number' ? +el.value : el.value;
+  }
+  if (!state.locked.includes('arrs')) patch.arrs = arrs.map(({ keySet, ...a }) => a);
+  const r = await fetch('/api/config', { method: 'POST', body: JSON.stringify(patch) });
+  document.getElementById('msg').textContent = r.ok ? 'Saved. Applies on the next poll.' : (await r.json()).error;
+  if (r.ok) load();
+};
+
+async function load() { state = await (await fetch('/api/state')).json(); render(); }
+load();
+setInterval(async () => { // refresh status + changes only, so unsaved edits are not lost
+  const s = await (await fetch('/api/state')).json();
+  state.status = s.status; state.changes = s.changes;
+  renderLog();
+}, 15000);
+</script>
+</body>
+</html>
