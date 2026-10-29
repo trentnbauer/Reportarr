@@ -114,6 +114,9 @@ test('the issue is resolved only once the replacement file is back, and only onc
   calls.length = 0; await poll();
   assert.ok(calls.includes('POST overseerr /api/v1/issue/11/resolved'));
   assert.match(changes().at(-1).detail, /replacement imported, resolved/);
+  assert.equal(changes().at(-1).status, 'resolved');
+  assert.ok(changes().some((r) => r.status === 'replacing' && r.reportId === 'overseerr:11'));
+  assert.equal((await import('../src/engine.mjs')).status.replacing, 0 + JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'state.json'), 'utf8')).pending.length);
   calls.length = 0; await poll();
   assert.ok(!calls.some((c) => c.includes('/resolved')), 'not resolved a second time');
   imported = false;

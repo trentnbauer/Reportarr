@@ -95,7 +95,7 @@ const seerr = {
     } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment: ${e.message}` }); }
     if (items.length) {
       ctx.watch(report, items);
-      record({ status: 'info', ...base, detail: `${what}: waiting for ${items.length} replacement file(s) before resolving` });
+      record({ status: 'replacing', ...base, detail: `${what}: waiting for ${items.length} replacement file(s) before resolving` });
     }
   },
 
@@ -103,7 +103,7 @@ const seerr = {
   async finish({ record }, src, p) {
     const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${p.ref}`;
     await api(src, 'POST', `/issue/${p.ref}/resolved`);
-    record({ status: 'info', reportId: p.reportId, source: p.source, detail: `${what}: replacement imported, resolved` });
+    record({ status: 'resolved', reportId: p.reportId, source: p.source, detail: `${what}: replacement imported, resolved` });
   },
 };
 export default seerr;

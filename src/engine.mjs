@@ -16,7 +16,7 @@ const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); write
 export const stateFile = () => dataFile('state.json');
 export const changesFile = () => dataFile('changes.json');
 
-export const status = { lastPoll: null, lastError: null, historic: 0 };
+export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0 };
 // Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
 // *arr instances every few minutes, download clients only when you press Test (logging in over and over can get you banned).
 export const health = {};
@@ -279,6 +279,7 @@ export async function poll() {
   }
   for (const id of retries.splice(0)) await retry(c, s, nodes, id);
   await checkPending(c, s);
+  status.replacing = s.pending.length;
   writeJson(stateFile(), s);
   status.historic = pendingHistoric(nodes, s.baseline).length;
   return errors.join('; ');
