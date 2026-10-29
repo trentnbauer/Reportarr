@@ -3,6 +3,9 @@ import fs from 'node:fs';
 
 // write to a temp file and rename over the old one, so a crash mid-write never leaves a half-written file
 export const writeFileAtomic = (f, data, opts) => { fs.writeFileSync(f + '.tmp', data, opts); fs.renameSync(f + '.tmp', f); };
+// Every comment Reportarr posts in another app ends with this, so people can tell a program wrote it.
+export const SIGN_OFF = 'Reportarr (automated system)';
+export const signed = (message) => `${message}\n\n— ${SIGN_OFF}`;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref()); // unref: a pending wait must not keep the process alive
 export const log = (...a) => console.log(new Date().toISOString(), ...a);
 export const trim = (u) => String(u ?? '').trim().replace(/\/+$/, '');

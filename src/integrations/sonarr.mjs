@@ -1,6 +1,6 @@
 // Sonarr (TV). Finds the episode file a Plex report or Overseerr issue is about, and says how to replace it.
 import path from 'node:path';
-import { request, fromEnv, envLines, normalize, checkArgs, check, fields } from './arr.mjs';
+import { request, fileName, fromEnv, envLines, normalize, checkArgs, check, fields } from './arr.mjs';
 import { idsOf } from './plex.mjs';
 
 const call = (a, method, p, body) => request('v3', a, method, p, body);
@@ -19,7 +19,7 @@ const sonarr = {
     if (!series) return;
     const eps = await call(a, 'GET', `/episode?seriesId=${series.id}&includeEpisodeFile=true`);
     const ep = eps.find((e) => e.seasonNumber === m.parentIndex && e.episodeNumber === m.index && e.hasFile && files.has(path.basename(e.episodeFile.path)));
-    if (ep) return { a, ep, fileId: ep.episodeFile.id };
+    if (ep) return { a, ep, fileId: ep.episodeFile.id, file: fileName(ep.episodeFile.path) };
   },
 
   // An Overseerr issue on a series: the reported episode, or every episode with a file in the reported season.
@@ -30,7 +30,8 @@ const sonarr = {
     if (!series) return [];
     const eps = await call(a, 'GET', `/episode?seriesId=${series.id}&includeEpisodeFile=true`);
     return eps.filter((e) => e.hasFile && e.seasonNumber === issue.problemSeason && (!issue.problemEpisode || e.episodeNumber === issue.problemEpisode))
-      .map((ep) => ({ a, ep, fileId: ep.episodeFile.id, title: `${series.title} ${sxe(ep)}` }));
+      .map((ep) => ({ a, ep, fileId: ep.episodeFile.id, file: fileName(ep.episodeFile.path), title: `${series.title} ${sxe(ep)}`,
+      plex: { type: 'episode', title: series.title, tvdb: series.tvdbId, tmdb: series.tmdbId, season: ep.seasonNumber, episode: ep.episodeNumber } }));
   },
 
   // what to call to find the grabbed release, delete the file, search again, and spot the new grab in the queue

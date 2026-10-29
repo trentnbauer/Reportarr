@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { DATA_DIR, getConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
 import { SOURCES, ARRS, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
-import { request } from './integrations/arr.mjs';
+import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
 
 const dataFile = (n) => path.join(DATA_DIR, n);
@@ -27,7 +27,7 @@ let lastArrCheck = 0;
 export function record(entry) {
   const rows = readJson(changesFile(), []);
   rows.push({ id: crypto.randomUUID(), time: new Date().toISOString(), ...entry });
-  writeJson(changesFile(), rows.slice(-500));
+  writeJson(changesFile(), rows.slice(-2000));
   log(entry.status, entry.title ?? '', entry.instance ?? '', entry.detail ?? '');
 }
 
@@ -108,10 +108,10 @@ const capFull = (c, s) => {
 };
 
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
-// Returns false when the daily cap stopped it, else (outside dry-run) where to look for the replacement file.
+// Returns false when the daily cap stopped it, else (outside dry-run) what to follow while the replacement arrives.
 async function swap(c, s, report, title, hit) {
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = ARRS[a.kind].plan(hit);
-  const base = { reportId: report.id, source: labelOf(report), title, instance: a.name };
+  const base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file };
   const files = ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`;
   if (c.dryRun) return record({ status: 'dry-run', ...base, detail: `would delete ${files}, blocklist, search` });
   if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `daily cap ${c.maxPerDay} reached: not replaced` }); return false; }
@@ -124,7 +124,7 @@ async function swap(c, s, report, title, hit) {
   await arr(a, 'POST', '/command', plan.cmd);
   record({ status: 'replaced', ...base, detail: `deleted ${files}, blocklisted: ${!!grabbed}, search started` });
   prioritizeLater(c, a, plan.match, title, base);
-  return plan.check && { arr: a.name, check: plan.check, title }; // what watch() needs to see the new file arrive
+  return plan.check && { arr: a.name, check: plan.check, match: plan.match, title, file: hit.file, plex: hit.plex }; // what checkPending follows
 }
 
 // What a source's replace() is handed: the settings, the log, and the ways to find and replace files.
@@ -144,22 +144,58 @@ const context = (c, s) => ({
 export const handleReport = (c, report, s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [] }) => sourceOf(report).replace(context(c, s), report);
 
 // ---- waiting for the new file
-// shortcut: gives up after a fixed 72h, make it a setting if a slow indexer ever needs longer.
-const PENDING_MAX_MS = 72 * 3600_000;
+// shortcut: fixed waits, make them settings if a slow indexer or a slow Plex scan ever needs longer.
+const PENDING_MAX_MS = 72 * 3600_000; // then the issue is left open for a person
+const PLEX_WAIT_MS = 60 * 60_000; // then it is resolved anyway: the file is imported, Plex may just not list it by this title
 
-// Replacements wait here until Sonarr/Radarr report a file for every item again, then the source finishes the report
-// (Seerr resolves the issue). Slow or failed downloads leave the issue open; after PENDING_MAX_MS it is left for a person.
+// Every replaced item goes replaced -> downloading -> downloaded -> imported -> available (in Plex), one row per step.
+// A step can be missed between two polls; it is skipped, except "downloaded" is logged when the import is first seen.
+const STAGES = ['replaced', 'downloading', 'downloaded', 'imported', 'available'];
+const reached = (it, st) => STAGES.indexOf(it.stage ?? 'replaced') >= STAGES.indexOf(st);
+const downloadDone = (q) => q.status === 'completed' || /^import/i.test(q.trackedDownloadState ?? '') || (q.size > 0 && q.sizeleft === 0);
+
+// Moves the items on as far as they have got; true when every one is available.
+async function advance(c, p, base, queues) {
+  const plex = c.sources.find((x) => x.kind === 'plex' && SOURCES.plex.isConfigured(x));
+  let all = true;
+  for (const it of p.items) {
+    const a = c.arrs.find((x) => x.name === it.arr);
+    const row = (status, detail) => record({ status, ...base, title: it.title, instance: a.name, file: it.newFile ?? it.file, detail });
+    if (!reached(it, 'imported')) {
+      const x = await arr(a, 'GET', it.check);
+      if (x?.hasFile) {
+        if (!reached(it, 'downloaded')) row('downloaded', 'download finished (seen when it was imported)');
+        it.newFile = fileName(x.movieFile?.path ?? x.episodeFile?.path);
+        it.importedAt = Date.now();
+        it.stage = 'imported';
+        row('imported', `${a.kind === 'radarr' ? 'Radarr' : 'Sonarr'} imported the new file`);
+      } else {
+        const q = (queues[a.name] ??= (await arr(a, 'GET', '/queue?pageSize=200')).records).find((r) => Object.entries(it.match).every(([k, v]) => r[k] === v));
+        if (q && !reached(it, 'downloading')) { it.stage = 'downloading'; row('downloading', `${q.title}${q.downloadClient ? ` via ${q.downloadClient}` : ''}`); }
+        if (q && !reached(it, 'downloaded') && downloadDone(q)) { it.stage = 'downloaded'; row('downloaded', 'download finished, waiting for import'); }
+      }
+    }
+    if (it.stage === 'imported') {
+      if (!plex || !it.plex) it.stage = 'available';
+      else if (await SOURCES.plex.available(plex, it.plex, it.newFile).catch(() => false)) { it.stage = 'available'; row('available', 'available in Plex'); }
+      else if (Date.now() - it.importedAt > PLEX_WAIT_MS) { it.stage = 'available'; row('info', `not listed in Plex after ${PLEX_WAIT_MS / 60_000} min: resolving anyway`); }
+    }
+    if (it.stage !== 'available') all = false;
+  }
+  return all;
+}
+
+// Replacements wait here until every item is available, then the source finishes the report (Seerr resolves the issue).
+// Slow or failed downloads leave the issue open; after PENDING_MAX_MS it is left for a person.
 export async function checkPending(c, s) {
-  const keep = [];
+  const keep = [], queues = {};
   for (const p of s.pending ?? []) {
     const src = c.sources.find((x) => x.name === p.source), base = { reportId: p.reportId, source: p.source };
     if (!src) { record({ status: 'error', ...base, detail: `${p.source} is no longer configured: not waiting for its replacement` }); continue; }
     if (Date.now() - Date.parse(p.since) > PENDING_MAX_MS) { record({ status: 'skipped', ...base, detail: `no replacement imported within ${PENDING_MAX_MS / 3600_000}h: left open` }); continue; }
+    if (p.items.some((i) => !c.arrs.some((a) => a.name === i.arr))) { record({ status: 'error', ...base, detail: 'an *arr instance is no longer configured: not waiting for its replacement' }); continue; }
     try {
-      const arrs = p.items.map((i) => c.arrs.find((a) => a.name === i.arr));
-      const have = await Promise.all(p.items.map((i, n) => arrs[n] && arr(arrs[n], 'GET', i.check).then((x) => !!x?.hasFile)));
-      if (have.some((h) => h === undefined)) { record({ status: 'error', ...base, detail: 'an *arr instance is no longer configured: not waiting for its replacement' }); continue; }
-      if (!have.every(Boolean)) { keep.push(p); continue; }
+      if (!(await advance(c, p, base, queues))) { keep.push(p); continue; }
       await SOURCES[p.kind].finish(context(c, s), src, p);
     } catch (e) {
       if (!p.failed) record({ status: 'error', ...base, detail: `checking the replacement failed (will retry): ${e.message}` });
@@ -183,6 +219,9 @@ const retries = [];
 let wake;
 export const requestHistoric = () => { historicRequested = true; wake?.(); };
 export const requestRetry = (id) => { retries.push(id); wake?.(); };
+
+// First row of a report's life; the UI's "By report" view groups rows by reportId.
+const received = (r) => record({ status: 'reported', reportId: r.id, source: labelOf(r), detail: 'report received' });
 
 // Handles one report unless the daily cap is already full. Returns false when it is.
 async function act(c, s, r) {
@@ -264,6 +303,7 @@ export async function poll() {
     }
     s.seen.push(r.id);
     writeJson(stateFile(), s); // mark first: a crash must not retry a delete
+    received(r);
     await act(c, s, r);
     writeJson(stateFile(), s);
   }
@@ -272,6 +312,8 @@ export async function poll() {
     const todo = pendingHistoric(nodes, s.baseline);
     record({ status: 'info', detail: `actioning ${todo.length} historic report(s)${c.dryRun ? ' (dry run)' : ''}` });
     for (const r of todo) {
+      if (capFull(c, s)) { record({ status: 'info', detail: 'daily cap reached; the remaining historic reports stay pending' }); break; }
+      received(r);
       if (!(await act(c, s, r))) { record({ status: 'info', detail: 'daily cap reached; the remaining historic reports stay pending' }); break; }
       if (!c.dryRun) s.baseline = s.baseline.filter((id) => id !== r.id); // a dry run leaves it pending for the real run
       writeJson(stateFile(), s);

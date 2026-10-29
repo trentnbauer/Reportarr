@@ -1,6 +1,6 @@
 // Radarr (movies). Finds the movie file a Plex report or Overseerr issue is about, and says how to replace it.
 import path from 'node:path';
-import { request, fromEnv, envLines, normalize, checkArgs, check, fields } from './arr.mjs';
+import { request, fileName, fromEnv, envLines, normalize, checkArgs, check, fields } from './arr.mjs';
 import { idsOf } from './plex.mjs';
 
 const call = (a, method, p, body) => request('v3', a, method, p, body);
@@ -14,14 +14,14 @@ const radarr = {
   async fromPlex({ a, m, files }) {
     if (m.type !== 'movie') return;
     const [movie] = await call(a, 'GET', `/movie?tmdbId=${idsOf(m.Guid).tmdb}`);
-    if (movie?.hasFile && files.has(path.basename(movie.movieFile.path))) return { a, movie, fileId: movie.movieFile.id };
+    if (movie?.hasFile && files.has(path.basename(movie.movieFile.path))) return { a, movie, fileId: movie.movieFile.id, file: fileName(movie.movieFile.path) };
   },
 
   // An Overseerr issue on a movie.
   async fromIssue({ a, issue }) {
     if (issue.media.mediaType !== 'movie') return [];
     const [movie] = await call(a, 'GET', `/movie?tmdbId=${issue.media.tmdbId}`);
-    return movie?.hasFile ? [{ a, movie, fileId: movie.movieFile.id, title: movie.title }] : [];
+    return movie?.hasFile ? [{ a, movie, fileId: movie.movieFile.id, file: fileName(movie.movieFile.path), title: movie.title, plex: { type: 'movie', title: movie.title, tmdb: movie.tmdbId } }] : [];
   },
 
   plan: ({ movie }) => ({

@@ -17,6 +17,7 @@ const listen = (handler) => new Promise((res) => { const s = http.createServer(h
 const json = (res, v) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(v)); };
 const route = (name) => (req) => { const u = new URL(req.url, 'http://x'); calls.push(`${req.method} ${name} ${u.pathname}${u.search}`); return u; };
 
+let queueRecords = [], lastComment = ''; // what Sonarr's queue holds, and the last comment posted to Seerr
 let imported = false; // flips when the replacement files "arrive" in Sonarr/Radarr
 const radarr = await listen((req, res) => {
   const u = route('radarr')(req);
@@ -34,11 +35,11 @@ const eps = [
 ];
 const sonarr = await listen((req, res) => {
   const u = route('sonarr')(req);
-  if (/^\/api\/v3\/episode\/\d+$/.test(u.pathname)) return json(res, { hasFile: imported });
+  if (/^\/api\/v3\/episode\/\d+$/.test(u.pathname)) return json(res, { hasFile: imported, episodeFile: imported ? { path: '/tv/Show/Season 2/Show - S02E01 new.mkv' } : undefined });
   if (u.pathname === '/api/v3/series') return json(res, u.searchParams.get('tvdbId') === '81189' || !u.search ? [{ id: 3, title: 'Show', tmdbId: 1399 }] : []);
   if (u.pathname === '/api/v3/episode') return json(res, eps);
   if (u.pathname === '/api/v3/history') return json(res, { records: [{ id: 88 }] });
-  if (u.pathname === '/api/v3/queue') return json(res, { records: [] });
+  if (u.pathname === '/api/v3/queue') return json(res, { records: queueRecords });
   res.end();
 });
 let issues = [];
@@ -46,6 +47,7 @@ const overseerr = await listen((req, res) => {
   const u = route('overseerr')(req);
   if (req.headers['x-api-key'] !== KEY) return res.writeHead(403).end();
   if (u.pathname === '/api/v1/issue') return json(res, { results: issues });
+  if (req.method === 'POST' && u.pathname.endsWith('/comment')) { let b = ''; req.on('data', (d) => (b += d)).on('end', () => { lastComment = JSON.parse(b).message; res.end(); }); return; }
   res.end();
 });
 
@@ -135,6 +137,28 @@ test('a replacement that never arrives is left open after the wait runs out', as
 test('a bad API key surfaces as an error, not a crash', async () => {
   saveConfig({ sources: [{ ...SRC, key: 'wrong-' + rnd() }] });
   await assert.rejects(poll(), /overseerr: overseerr GET \/issue.* 403/);
+});
+
+test('every step of a replacement is logged against the report and the file, and the comment is signed', async () => {
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs }); // the test before left a wrong key saved
+  issues = [issue(12, tv, { problemSeason: 2, problemEpisode: 1 })];
+  calls.length = 0; await poll();
+  assert.match(lastComment, /\n\n— Reportarr \(automated system\)$/);
+  const rows = () => changes().filter((r) => r.reportId === 'overseerr:12').map((r) => r.status);
+  assert.deepEqual(rows(), ['reported', 'replaced', 'replacing']);
+  queueRecords = [{ episodeId: 13, status: 'downloading', size: 10, sizeleft: 4, title: 'Show.S02E01.1080p' }];
+  await poll();
+  assert.equal(rows().at(-1), 'downloading');
+  queueRecords = [{ episodeId: 13, status: 'completed', size: 10, sizeleft: 0, title: 'Show.S02E01.1080p' }];
+  await poll();
+  assert.equal(rows().at(-1), 'downloaded');
+  imported = true; queueRecords = [];
+  await poll();
+  assert.deepEqual(rows().slice(-2), ['imported', 'resolved']);
+  const done = changes().find((r) => r.reportId === 'overseerr:12' && r.status === 'imported');
+  assert.equal(done.file, 'Show - S02E01 new.mkv');
+  assert.equal(changes().find((r) => r.reportId === 'overseerr:12' && r.status === 'replaced').file, undefined, 'mock episode file has no path');
+  imported = false;
 });
 
 test.after(() => { for (const s of [radarr, sonarr, overseerr]) s.close(); });
