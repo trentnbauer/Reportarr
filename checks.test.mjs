@@ -21,6 +21,7 @@ const { runCheck } = await import('./checks.mjs');
 
 const arrServer = (appName) => listen((req, res) => (req.url === '/api/v3/system/status' && req.headers['x-api-key'] === S.arr ? json(res, { appName, version: '4.0.20' }) : res.writeHead(req.url.startsWith('/api/v3') ? 401 : 404).end()));
 const sonarr = await arrServer('Sonarr');
+const lidarr = await listen((req, res) => (req.url === '/api/v1/system/status' && req.headers['x-api-key'] === S.arr ? json(res, { appName: 'Lidarr', version: '3.1.0' }) : res.writeHead(404).end())); // Lidarr only has API v1
 const radarr = await arrServer('Radarr');
 const overseerr = await listen((req, res) => {
   if (req.url === '/api/v1/status') return json(res, { version: '1.34.0' });
@@ -65,6 +66,12 @@ test('Sonarr/Radarr: key checked, and a Radarr set up as Sonarr is caught', asyn
 test('missing settings are named properly', async () => {
   assert.equal((await runCheck(base, { target: 'client', kind: 'sabnzbd', name: '', url: 'http://x', apiKey: '' })).message, 'Set an API key first');
   assert.equal((await runCheck(base, { target: 'overseerr' })).message, 'Set a URL and an API key first');
+});
+
+test('Lidarr is checked on its v1 API', async () => {
+  const ok = await runCheck(base, { target: 'arr', name: 'm', kind: 'lidarr', url: url(lidarr), key: S.arr });
+  assert.deepEqual([ok.ok, ok.message], [true, 'Lidarr 3.1.0: API key accepted']);
+  assert.match((await runCheck(base, { target: 'arr', name: 'm', kind: 'sonarr', url: url(lidarr), key: S.arr })).message, /HTTP 404|base path/); // v3 does not exist there
 });
 
 test('Overseerr: key must be able to read issues', async () => {
@@ -113,4 +120,4 @@ test('unreachable hosts fail with a reason, and messages never contain secrets',
   assert.equal((await runCheck(base, { target: 'nope' })).ok, false);
 });
 
-test.after(() => { for (const s of [chatty, plex, community, sonarr, radarr, overseerr, qbit, sab]) s.close(); });
+test.after(() => { for (const s of [lidarr, chatty, plex, community, sonarr, radarr, overseerr, qbit, sab]) s.close(); });

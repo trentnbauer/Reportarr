@@ -1,5 +1,7 @@
 // "Test" buttons: each check makes the same kind of call the app really makes, with a short timeout, and returns
 // { ok, message }. Messages never contain keys or passwords.
+import { ARR_API } from './config.mjs';
+
 const TIMEOUT_MS = 10_000;
 export const PLEX_COMMUNITY_URL = () => process.env.PLEX_COMMUNITY_URL || 'https://community.plex.tv/api';
 
@@ -42,7 +44,7 @@ const CHECKS = {
   async arr({ kind, url, key }) {
     const missing = need({ url, key }, 'url', 'key');
     if (missing.length) return fail(`Set ${missing.join(' and ')} first`);
-    const r = await get(`${url}/api/v3/system/status`, { headers: { 'X-Api-Key': key } });
+    const r = await get(`${url}/api/${ARR_API[kind] ?? 'v3'}/system/status`, { headers: { 'X-Api-Key': key } });
     if (!r.ok) return fail(`${kind}: ${refused(r.status, 'the API key')}${r.status === 404 ? ' (is the URL right, including any base path?)' : ''}`);
     const st = await r.json().catch(() => ({}));
     if (st.appName && st.appName.toLowerCase() !== kind) return fail(`That address is ${st.appName}, but it is set up as ${kind}`);

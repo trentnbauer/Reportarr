@@ -6,12 +6,16 @@ export const DATA_DIR = process.env.DATA_DIR ?? '/data';
 const FILE = path.join(DATA_DIR, 'config.json');
 const e = process.env;
 
+// The apps Reportarr can replace files in. Lidarr's API is v1, the others v3.
+export const ARR_KINDS = ['sonarr', 'radarr', 'lidarr'];
+export const ARR_API = { sonarr: 'v3', radarr: 'v3', lidarr: 'v1' };
+
 export const SECRETS = ['plexToken', 'qbitPassword', 'sabApiKey', 'overseerrKey'];
 const DEFAULTS = {
   plexUrl: 'http://plex:32400', plexToken: '', pollSeconds: 60, maxPerDay: 20, dryRun: true,
   // Overseerr/Seerr issues are a second source of reports. Types: video, audio, subtitles, other.
   overseerrUrl: '', overseerrKey: '', overseerrTypes: 'video,audio,other', overseerrResolve: true,
-  // [{name, kind: 'sonarr'|'radarr', url, key}]
+  // [{name, kind: 'sonarr'|'radarr'|'lidarr', url, key}]
   arrs: [],
   // [{name, kind: 'qbittorrent'|'sabnzbd', url, username, password, apiKey}], matched to the arr's client by host:port or name
   clients: [],
@@ -19,10 +23,10 @@ const DEFAULTS = {
   qbitUrl: '', qbitUsername: '', qbitPassword: '', sabUrl: '', sabApiKey: '',
 };
 // Instances come from numbered variables, any number of them: SONARR_1_URL, SONARR_1_KEY, SONARR_2_URL, ... and the same for RADARR.
-// An optional SONARR_1_NAME sets the display name. Unnumbered SONARR_URL/SONARR_KEY still work, and so does the older ARRS JSON.
+// An optional SONARR_1_NAME sets the display name. The same works for LIDARR_N_*. Unnumbered SONARR_URL/SONARR_KEY still work, and so does the older ARRS JSON.
 function arrsFromEnv() {
   const out = [];
-  for (const kind of ['sonarr', 'radarr']) {
+  for (const kind of ARR_KINDS) {
     const K = kind.toUpperCase();
     const ids = new Set(Object.keys(e).map((k) => k.match(new RegExp(`^${K}_(?:(\\d+)_)?URL$`))).filter(Boolean).map((m) => m[1] ?? ''));
     for (const n of [...ids].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a - b))) {
@@ -69,8 +73,8 @@ export function validate(patch) {
     }
   }
   for (const a of patch.arrs ?? []) {
-    if (!a.name || !['sonarr', 'radarr'].includes(a.kind) || !/^https?:\/\//.test(a.url)) {
-      throw new Error(`invalid instance "${a.name ?? ''}": needs name, kind sonarr|radarr and an http(s) url`);
+    if (!a.name || !ARR_KINDS.includes(a.kind) || !/^https?:\/\//.test(a.url)) {
+      throw new Error(`invalid instance "${a.name ?? ''}": needs name, kind sonarr|radarr|lidarr and an http(s) url`);
     }
   }
 }
@@ -111,7 +115,7 @@ export function envFile(c = getConfig()) {
   const L = ['# Reportarr settings, exported from the web UI. Contains secrets: keep it private and never commit it.', '# Save as .env next to docker-compose.yml.', ''];
   const add = (k, v) => L.push(`${k}=${q(v)}`);
   add('PLEX_URL', c.plexUrl); add('PLEX_KEY', c.plexToken);
-  for (const kind of ['sonarr', 'radarr']) {
+  for (const kind of ARR_KINDS) {
     c.arrs.filter((a) => a.kind === kind).forEach((a, i) => {
       L.push('', `# ${a.name}`);
       add(`${kind.toUpperCase()}_${i + 1}_NAME`, a.name); add(`${kind.toUpperCase()}_${i + 1}_URL`, a.url); add(`${kind.toUpperCase()}_${i + 1}_KEY`, a.key);

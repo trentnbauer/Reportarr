@@ -59,7 +59,7 @@ try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light'
     <button type="button" class="ghost" data-test="sab">Test SABnzbd (default)</button>
     <span id="testresult" class="muted" role="status"></span>
   </p>
-  <h3>Sonarr / Radarr instances <span id="arrlock"></span></h3>
+  <h3>Sonarr / Radarr / Lidarr instances <span id="arrlock"></span></h3>
   <div id="arrs"></div>
   <button type="button" class="ghost" id="addarr">Add instance</button>
   <h3>Download clients <span id="clientlock"></span></h3>
@@ -146,7 +146,7 @@ function renderArrs() {
   document.getElementById('addarr').hidden = lock;
   document.getElementById('arrs').innerHTML = arrs.map((a, i) => `<div class="arr">
     <label>Name<input data-i="${i}" data-k="name" value="${esc(a.name)}" ${lock ? 'disabled' : ''}></label>
-    <label>Kind<select data-i="${i}" data-k="kind" ${lock ? 'disabled' : ''}><option ${a.kind === 'sonarr' ? 'selected' : ''}>sonarr</option><option ${a.kind === 'radarr' ? 'selected' : ''}>radarr</option></select></label>
+    <label>Kind<select data-i="${i}" data-k="kind" ${lock ? 'disabled' : ''}>${['sonarr', 'radarr', 'lidarr'].map((k) => `<option ${a.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
     <label>URL (include base path)<input data-i="${i}" data-k="url" value="${esc(a.url)}" ${lock ? 'disabled' : ''}></label>
     <label>API key<input type="password" data-i="${i}" data-k="key" placeholder="${a.keySet ? '(set)' : ''}" ${lock ? 'disabled' : ''}></label>
     ${lock ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}
