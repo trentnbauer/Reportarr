@@ -45,13 +45,57 @@ test('unnumbered SONARR_URL and the older ARRS JSON keep working next to numbere
   assert.deepEqual(c.arrs.map((a) => a.name), ['old', 'sonarr', 'radarr-1']);
 });
 
-test('PLEX_KEY is the Plex token, PLEX_TOKEN still works, and blank variables lock nothing', () => {
+const srcs = (c) => c.sources.map((s) => [s.name, s.kind, s.url]);
+
+test('any number of Plex servers and Overseerr/Seerr instances, from numbered variables', () => {
+  const k = { a: rnd(), b: rnd(), c: rnd(), d: rnd() };
+  const { c, locked } = loadConfig({
+    PLEX_URL: 'http://plex:32400/', PLEX_KEY: k.a,                                  // the original single-server form
+    PLEX_2_URL: 'http://10.0.0.20:32400', PLEX_2_KEY: k.b, PLEX_2_NAME: 'family',
+    PLEX_10_URL: 'http://plex10:32400', PLEX_10_KEY: k.c,                           // 10 sorts after 2
+    OVERSEERR_URL: 'http://seerr:5055', OVERSEERR_KEY: k.d, OVERSEERR_ISSUE_TYPES: 'video, AUDIO,bogus', OVERSEERR_RESOLVE: 'false',
+    OVERSEERR_2_URL: 'http://seerr2:5055', OVERSEERR_2_KEY: k.a, OVERSEERR_2_NAME: 'seerr-4k',
+  });
+  assert.deepEqual(srcs(c), [['plex', 'plex', 'http://plex:32400'], ['family', 'plex', 'http://10.0.0.20:32400'], ['plex-10', 'plex', 'http://plex10:32400'],
+    ['overseerr', 'seerr', 'http://seerr:5055'], ['seerr-4k', 'seerr', 'http://seerr2:5055']]);
+  assert.deepEqual([c.sources[3].issueTypes, c.sources[3].resolve, c.sources[4].issueTypes, c.sources[4].resolve], ['video,audio', false, 'video,audio,other', true]);
+  assert.equal(c.sources[1].key, k.b);
+  assert.ok(!locked.includes('sources'));
+});
+
+test('PLEX_TOKEN still works, a Plex URL without a token is not a source, and blank variables lock nothing', () => {
   const t = rnd();
-  assert.equal(loadConfig({ PLEX_KEY: t }).c.plexToken, t);
-  assert.equal(loadConfig({ PLEX_TOKEN: t }).c.plexToken, t);
-  const none = loadConfig({ PLEX_KEY: '', SONARR_1_URL: '', OVERSEERR_KEY: '' });
-  assert.deepEqual(none.locked, []);
-  assert.equal(loadConfig({ OVERSEERR_API_KEY: t }).c.overseerrKey, t);
+  assert.deepEqual(srcs(loadConfig({ PLEX_TOKEN: t }).c), [['plex', 'plex', 'http://plex:32400']]);
+  assert.equal(loadConfig({ PLEX_TOKEN: t }).c.sources[0].key, t);
+  assert.deepEqual(loadConfig({ PLEX_URL: 'http://plex:32400' }).c.sources, []); // the compose default alone is not a configured server
+  const none = loadConfig({ PLEX_KEY: '', PLEX_2_URL: '', SONARR_1_URL: '', OVERSEERR_KEY: '', OVERSEERR_URL: '' });
+  assert.deepEqual([none.locked, none.c.sources], [[], []]);
+  assert.equal(loadConfig({ OVERSEERR_URL: 'http://s:5055', OVERSEERR_API_KEY: t }).c.sources[0].key, t);
+});
+
+test('the old single QBIT_* and SAB_* settings become read-only default download clients', () => {
+  const k = { q: rnd(), s: rnd() };
+  const r = loadConfig({ QBIT_URL: 'http://qb:8080/', QBIT_USERNAME: 'admin', QBIT_PASSWORD: k.q, SAB_URL: '', SAB_API_KEY: k.s,
+    CLIENTS: JSON.stringify([{ name: 'qb2', kind: 'qbittorrent', url: 'http://qb2:8080', username: 'u', password: 'p', apiKey: '' }]) });
+  assert.deepEqual(r.c.clients.map((x) => [x.name, x.kind, x.url, !!x.default]), [['qb2', 'qbittorrent', 'http://qb2:8080', false], ['qbittorrent', 'qbittorrent', 'http://qb:8080', true], ['sabnzbd', 'sabnzbd', '', true]]);
+  assert.deepEqual(loadConfig({}).c.clients, []);
+});
+
+test('settings saved by an older version are read as sources and clients, and rewritten without the old keys', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-legacy-'));
+  const k = { p: rnd(), o: rnd(), q: rnd() };
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ plexUrl: 'http://plex:32400', plexToken: k.p, overseerrUrl: 'http://seerr:5055', overseerrKey: k.o, overseerrTypes: 'video', overseerrResolve: false,
+    qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: k.q, maxPerDay: 9, arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989', key: 'k' }] }));
+  const r = inProcess({ DATA_DIR: data }, `
+    const c = m.getConfig(); const before = { sources: c.sources.map((s) => [s.name, s.kind, s.key === ${JSON.stringify(k.p)} || s.key === ${JSON.stringify(k.o)}, s.issueTypes, s.resolve]), clients: c.clients.map((x) => [x.name, !!x.default, x.password === ${JSON.stringify(k.q)}]), max: c.maxPerDay };
+    m.saveConfig({ maxPerDay: 12 });
+    return { before, file: JSON.parse(await (await import('node:fs/promises')).readFile(${JSON.stringify(path.join(data, 'config.json'))}, 'utf8')) };`);
+  assert.deepEqual(r.before.sources, [['plex', 'plex', true, null, null], ['overseerr', 'seerr', true, 'video', false]]);
+  assert.deepEqual(r.before.clients, [['qbittorrent', true, true]]);
+  assert.equal(r.before.max, 9);
+  assert.deepEqual(Object.keys(r.file).filter((x) => /^(plex|overseerr|qbit|sab)/.test(x)), [], 'old keys are gone after a save');
+  assert.equal(r.file.maxPerDay, 12);
+  assert.deepEqual(r.file.sources.map((s) => s.name), ['plex', 'overseerr']);
 });
 
 test('the exported .env reproduces the same settings, including awkward characters', async () => {
@@ -59,19 +103,21 @@ test('the exported .env reproduces the same settings, including awkward characte
   const { saveConfig, getConfig, envFile } = await import('./config.mjs');
   const awkward = `p a#ss$word'"x\\${rnd()}`;
   saveConfig({
-    plexUrl: 'http://plex:32400', plexToken: awkward, dryRun: false, maxPerDay: 7, pollSeconds: 90,
-    overseerrUrl: 'http://seerr:5055', overseerrKey: rnd(), overseerrTypes: 'video,audio', overseerrResolve: false,
-    qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: awkward, sabApiKey: rnd(),
+    dryRun: false, maxPerDay: 7, pollSeconds: 90,
+    sources: [
+      { name: 'plex', kind: 'plex', url: 'http://plex:32400', key: awkward }, { name: 'family room', kind: 'plex', url: 'http://10.0.0.20:32400', key: rnd() },
+      { name: 'overseerr', kind: 'seerr', url: 'http://seerr:5055', key: rnd(), issueTypes: 'video,audio', resolve: false }, { name: 'seerr-2', kind: 'seerr', url: 'http://seerr2:5055', key: rnd(), issueTypes: 'other', resolve: true },
+    ],
     arrs: [{ name: 'tv one', kind: 'sonarr', url: 'http://s1:8989/sonarr', key: rnd() }, { name: 'tv two', kind: 'sonarr', url: 'http://s2:8989', key: rnd() }, { name: 'films', kind: 'radarr', url: 'http://r:7878', key: rnd() }, { name: 'my music', kind: 'lidarr', url: 'http://l:8686/lidarr', key: rnd() }],
-    clients: [{ name: 'q1', kind: 'qbittorrent', url: 'http://q1:8080', username: 'u', password: awkward, apiKey: '' }],
+    clients: [{ name: 'q1', kind: 'qbittorrent', url: 'http://q1:8080', username: 'u', password: awkward, apiKey: '' }, { name: 'sabnzbd', kind: 'sabnzbd', url: '', username: '', password: '', apiKey: rnd(), default: true }],
   });
   const original = getConfig();
   const text = envFile(original);
-  assert.match(text, /SONARR_1_URL=.*\n.*SONARR_2_|SONARR_1_NAME/s);
+  assert.match(text, /PLEX_1_NAME=plex\nPLEX_1_URL=.*\nPLEX_1_KEY=/);
+  assert.match(text, /PLEX_2_NAME='family room'/);
+  assert.match(text, /OVERSEERR_2_NAME=seerr-2/);
   const { c } = loadConfig(parseDotenv(text));
-  for (const k of ['plexUrl', 'plexToken', 'dryRun', 'maxPerDay', 'pollSeconds', 'overseerrUrl', 'overseerrKey', 'overseerrTypes', 'overseerrResolve', 'qbitUrl', 'qbitUsername', 'qbitPassword', 'sabApiKey', 'arrs', 'clients']) {
-    assert.deepEqual(c[k], original[k], k);
-  }
+  for (const k of ['dryRun', 'maxPerDay', 'pollSeconds', 'sources', 'arrs', 'clients']) assert.deepEqual(c[k], original[k], k);
 });
 
 test('the .env download needs the web UI password and carries the saved settings', async () => {
@@ -79,7 +125,7 @@ test('the .env download needs the web UI password and carries the saved settings
   process.env.UI_PASSWORD = pass; process.env.UI_PORT = '0';
   const { saveConfig } = await import('./config.mjs');
   const { serve } = await import('./app.mjs');
-  saveConfig({ plexToken: token });
+  saveConfig({ sources: [{ name: 'plex', kind: 'plex', url: 'http://plex:32400', key: token }] });
   const srv = serve(); await new Promise((r) => srv.once('listening', r));
   const url = `http://127.0.0.1:${srv.address().port}/api/env`;
   try {
@@ -88,7 +134,7 @@ test('the .env download needs the web UI password and carries the saved settings
     assert.equal(ok.status, 200);
     assert.match(ok.headers.get('content-disposition'), /attachment; filename="reportarr\.env"/);
     assert.equal(ok.headers.get('cache-control'), 'no-store');
-    assert.match(await ok.text(), new RegExp(`PLEX_KEY=${token}`));
+    assert.match(await ok.text(), new RegExp(`PLEX_1_KEY=${token}`));
   } finally { srv.close(); }
 });
 

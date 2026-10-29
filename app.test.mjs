@@ -20,16 +20,17 @@ test('ratingKeyOf / idsOf parse Plex references', () => {
 });
 
 test('env wins over the UI and is reported as locked', () => {
-  saveConfig({ pollSeconds: 5, maxPerDay: 3 });
+  saveConfig({ pollSeconds: 15, maxPerDay: 3 });
   assert.equal(getConfig().pollSeconds, 30);
   assert.equal(getConfig().maxPerDay, 3);
   assert.deepEqual(lockedKeys(), ['pollSeconds']);
 });
 
 test('secrets are never exposed and blank keeps the stored one', () => {
-  saveConfig({ plexToken: S.token, arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989/', key: S.key }] });
-  saveConfig({ plexToken: '', arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989', key: '' }] });
-  assert.equal(getConfig().plexToken, S.token);
+  saveConfig({ sources: [{ name: 'plex', kind: 'plex', url: 'http://plex:32400', key: S.token }], arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989/', key: S.key }] });
+  saveConfig({ sources: [{ name: 'plex', kind: 'plex', url: 'http://plex:32400', key: '' }], arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989', key: '' }] });
+  assert.equal(getConfig().sources[0].key, S.token);
+  assert.equal(publicConfig().sources[0].keySet, true);
   assert.equal(getConfig().arrs[0].key, S.key);
   assert.ok(!JSON.stringify(publicConfig()).includes(S.token) && !JSON.stringify(publicConfig()).includes(S.key));
   assert.equal(publicConfig().arrs[0].keySet, true);
@@ -73,7 +74,7 @@ const fakeArr = await listen((req, res) => {
   res.writeHead(404).end();
 });
 const arrCfg = { name: 'fake', url: `http://127.0.0.1:${fakeArr.address().port}`, key: 'k' };
-const base = { clients: [], qbitUrl: '', qbitUsername: '', qbitPassword: '', sabUrl: '', sabApiKey: '' };
+const base = { clients: [] };
 const cfg = { ...base, clients: [
   { name: 'qb-a', kind: 'qbittorrent', url: `http://127.0.0.1:${pA}`, username: 'admin', password: S.pwA, apiKey: '' },
   { name: 'qb-b', kind: 'qbittorrent', url: `http://127.0.0.1:${pB}/`, username: 'admin', password: S.pwB, apiKey: '' },
@@ -88,7 +89,7 @@ test('each download goes to its own qBittorrent / SABnzbd, matched by host:port 
 
 test('falls back to the default client, and reports hidden secrets clearly', async () => {
   hits.length = 0;
-  await prioritize({ ...base, qbitPassword: S.pwA, clients: [] }, arrCfg, (r) => r.episodeId === 1, 't', 0);
+  await prioritize({ clients: [{ name: 'qbittorrent', kind: 'qbittorrent', url: '', username: 'admin', password: S.pwA, apiKey: '', default: true }] }, arrCfg, (r) => r.episodeId === 1, 't', 0);
   assert.deepEqual(hits, [['qbA', 'aaaa']]);
   await assert.rejects(prioritize(base, arrCfg, (r) => r.episodeId === 2, 't', 0), /hidden by the arr/);
   await assert.rejects(prioritize({ ...cfg, clients: [{ ...cfg.clients[1], password: S.wrong }] }, arrCfg, (r) => r.episodeId === 2, 't', 0), /login failed/);
@@ -96,7 +97,7 @@ test('falls back to the default client, and reports hidden secrets clearly', asy
 
 test('clientFor ignores clients of another kind or host', () => {
   const f = { host: '127.0.0.1', port: pA };
-  assert.equal(clientFor(cfg, 'Sabnzbd', f, 'x').name, 'default');
+  assert.equal(clientFor(cfg, 'Sabnzbd', f, 'x').name, 'none');
   assert.equal(clientFor(cfg, 'QBittorrent', f, 'x').name, 'qb-a');
   assert.equal(clientFor(cfg, 'Deluge', f, 'x'), undefined);
 });

@@ -1,4 +1,4 @@
-// Polls Plex "Reported Issues" and Overseerr/Seerr issues; for each new report deletes the reported file in
+// Polls Plex "Reported Issues" (any number of Plex servers) and Overseerr/Seerr issues (any number of instances); for each new report deletes the reported file in
 // Sonarr/Radarr, blocklists the release it came from, searches again and moves the
 // new grab to the top of the download queue. A small web UI shows changes and settings.
 import fs from 'node:fs';
@@ -22,6 +22,24 @@ const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.wr
 export const VERSION = (process.env.APP_VERSION ?? 'dev').replace(/^([0-9a-f]{7})[0-9a-f]{33}$/, '$1');
 
 const status = { lastPoll: null, lastError: null, historic: 0 };
+// Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
+// *arr instances every few minutes, download clients only when you press Test (logging in over and over can get you banned).
+const health = {};
+const ARR_CHECK_MS = 5 * 60_000;
+let lastArrCheck = 0;
+
+// How many replacements today out of the daily limit.
+const todayCount = (c) => {
+  const s = readJson(dataFile('state.json'), {}), today = new Date().toISOString().slice(0, 10);
+  return { count: s.day === today ? s.count ?? 0 : 0, max: c.maxPerDay };
+};
+
+// Health entries for what is configured now (a removed source or instance must not linger).
+const currentHealth = (c) => Object.fromEntries([
+  ...c.sources.map((x) => [`source:${x.name}`, health[`source:${x.name}`]]),
+  ...c.arrs.map((x) => [`arr:${x.name}`, health[`arr:${x.name}`]]),
+  ...c.clients.map((x) => [`client:${x.name}`, health[`client:${x.name}`]]),
+].filter(([, v]) => v));
 
 // What the UI shows: one row per action the app took (or would take, in dry-run).
 function record(entry) {
@@ -31,8 +49,8 @@ function record(entry) {
   log(entry.status, entry.title ?? '', entry.instance ?? '', entry.detail ?? '');
 }
 
-const plex = async (c, p) => {
-  const r = await fetch(c.plexUrl + p, { headers: { 'X-Plex-Token': c.plexToken, Accept: 'application/json' } });
+const plex = async (src, p) => {
+  const r = await fetch(src.url + p, { headers: { 'X-Plex-Token': src.key, Accept: 'application/json' } });
   if (r.status === 404) return {}; // item already deleted or replaced
   if (!r.ok) throw new Error(`plex ${p} ${r.status}`);
   return (await r.json()).MediaContainer;
@@ -47,10 +65,10 @@ const arr = async (a, method, p, body) => {
   const text = await r.text();
   return text ? JSON.parse(text) : null;
 };
-const reports = async (c) => {
+const reports = async (src) => {
   const r = await fetch(PLEX_COMMUNITY_URL(), {
     method: 'POST',
-    headers: { 'X-Plex-Token': c.plexToken, 'Content-Type': 'application/json' },
+    headers: { 'X-Plex-Token': src.key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: '{ reports(first: 50) { nodes { id date url } } }' }),
   });
   const j = await r.json();
@@ -58,10 +76,10 @@ const reports = async (c) => {
   return j.data.reports.nodes;
 };
 
-const overseerr = async (c, method, p, body) => {
-  const r = await fetch(`${c.overseerrUrl.replace(/\/$/, '')}/api/v1${p}`, {
+const overseerr = async (src, method, p, body) => {
+  const r = await fetch(`${src.url.replace(/\/$/, '')}/api/v1${p}`, {
     method,
-    headers: { 'X-Api-Key': c.overseerrKey, 'Content-Type': 'application/json' },
+    headers: { 'X-Api-Key': src.key, 'Content-Type': 'application/json' },
     body: body && JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`overseerr ${method} ${p} ${r.status}`);
@@ -69,13 +87,19 @@ const overseerr = async (c, method, p, body) => {
   return text ? JSON.parse(text) : null;
 };
 // shortcut: only the 100 newest open issues are read, upgrade to paging if you ever have more open at once
-const overseerrIssues = async (c) => (await overseerr(c, 'GET', '/issue?take=100&filter=open&sort=added')).results
-  .map((issue) => ({ id: `overseerr:${issue.id}`, date: issue.createdAt, source: 'overseerr', issue }));
+// the first instance keeps the original id format (a source named "overseerr"), so existing state and logs stay valid
+const overseerrIssues = async (src) => (await overseerr(src, 'GET', '/issue?take=100&filter=open&sort=added')).results
+  .map((issue) => ({ id: src.name === 'overseerr' ? `overseerr:${issue.id}` : `overseerr:${src.name}:${issue.id}`, date: issue.createdAt, kind: 'seerr', source: src.name, src, issue }));
+
+// Which source a report or issue came from, for the changes list: "Plex report", "plex-family report", "Overseerr issue #212 · video".
+const label = (r) => (r.kind === 'seerr'
+  ? `${r.src?.name === 'overseerr' ? 'Overseerr' : r.src?.name} issue #${r.issue.id} · ${ISSUE_TYPE[r.issue.issueType] ?? 'other'}`
+  : `${!r.src || r.src.name === 'plex' ? 'Plex' : r.src.name} report`);
 
 // Find the arr instance + item that owns one of the reported file names.
-async function locate(c, m, files) {
+async function locate(c, m, files, src) {
   if (m.type === 'episode') {
-    const tvdb = idsOf((await plex(c, `/library/metadata/${m.grandparentRatingKey}`)).Metadata[0].Guid).tvdb;
+    const tvdb = idsOf((await plex(src, `/library/metadata/${m.grandparentRatingKey}`)).Metadata[0].Guid).tvdb;
     for (const a of c.arrs.filter((x) => x.kind === 'sonarr')) {
       const [series] = await arr(a, 'GET', `/series?tvdbId=${tvdb}`);
       if (!series) continue;
@@ -105,15 +129,14 @@ const real = (v) => (v && !/^\*+$/.test(v) ? v : ''); // Sonarr/Radarr mask stor
 const sameHost = (url, f) => { try { const u = new URL(url); return u.hostname === f.host && +(u.port || (u.protocol === 'https:' ? 443 : 80)) === +f.port; } catch { return false; } };
 
 // Pick the configured download client for one of the arr's clients: an entry in `clients` that has the
-// same host:port (or name), else the default qBittorrent/SABnzbd settings, else the arr's own host.
+// same host:port (or name), else the one marked default for that kind (the old single QBIT_*/SAB_* settings), else the arr's own host.
 export function clientFor(c, implementation, f, armName) {
   const kind = CLIENT_KIND[implementation];
   if (!kind) return;
   const own = `http${f.useSsl ? 's' : ''}://${f.host}:${f.port}${f.urlBase ? '/' + f.urlBase.replace(/^\//, '') : ''}`;
-  const listed = c.clients.find((x) => x.kind === kind && (sameHost(x.url, f) || x.name === armName));
-  const dflt = kind === 'qbittorrent' ? { url: c.qbitUrl, username: c.qbitUsername, password: c.qbitPassword } : { url: c.sabUrl, apiKey: c.sabApiKey };
-  const x = listed ?? dflt;
-  return { kind, name: listed?.name ?? 'default', url: (x.url || own).replace(/\/$/, ''), username: x.username || f.username, password: x.password || real(f.password), apiKey: x.apiKey || real(f.apiKey) };
+  const listed = c.clients.find((x) => x.kind === kind && ((x.url && sameHost(x.url, f)) || x.name === armName)) ?? c.clients.find((x) => x.kind === kind && x.default);
+  const x = listed ?? {};
+  return { kind, name: listed?.name ?? 'none', url: (x.url || own).replace(/\/$/, ''), username: x.username || f.username, password: x.password || real(f.password), apiKey: x.apiKey || real(f.apiKey) };
 }
 
 // Arr apps have no per-item queue priority, so push the new grab to the top in its download client.
@@ -154,25 +177,26 @@ const planFor = ({ ep, movie, albumId }) => {
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
 async function swap(c, report, title, hit) {
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = planFor(hit);
-  if (c.dryRun) return record({ status: 'dry-run', reportId: report.id, title, instance: a.name, detail: `would delete ${ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`}, blocklist, search` });
+  if (c.dryRun) return record({ status: 'dry-run', reportId: report.id, source: label(report), title, instance: a.name, detail: `would delete ${ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`}, blocklist, search` });
   const hist = await arr(a, 'GET', plan.hist);
   const grabbed = (hist.records ?? hist)[0];
   for (const id of ids) await arr(a, 'DELETE', plan.del(id));
-  if (grabbed) await arr(a, 'POST', `/history/failed/${grabbed.id}`).catch((e) => record({ status: 'error', reportId: report.id, title, instance: a.name, detail: 'blocklist failed: ' + e.message }));
+  if (grabbed) await arr(a, 'POST', `/history/failed/${grabbed.id}`).catch((e) => record({ status: 'error', reportId: report.id, source: label(report), title, instance: a.name, detail: 'blocklist failed: ' + e.message }));
   await arr(a, 'POST', '/command', plan.cmd);
-  record({ status: 'replaced', reportId: report.id, title, instance: a.name, detail: `deleted ${ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`}, blocklisted: ${!!grabbed}, search started` });
+  record({ status: 'replaced', reportId: report.id, source: label(report), title, instance: a.name, detail: `deleted ${ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`}, blocklisted: ${!!grabbed}, search started` });
   prioritize(c, a, plan.ours, title)
-    .catch((e) => record({ status: 'error', reportId: report.id, title, instance: a.name, detail: 'priority failed: ' + e.message }));
+    .catch((e) => record({ status: 'error', reportId: report.id, source: label(report), title, instance: a.name, detail: 'priority failed: ' + e.message }));
 }
 
 export async function replace(c, report) {
+  const src = report.src ?? c.sources.find((x) => x.kind === 'plex'); // the Plex server this report came from
   const key = ratingKeyOf(report.url);
-  const m = key && (await plex(c, `/library/metadata/${key}`)).Metadata?.[0];
-  if (!m) return record({ status: 'skipped', reportId: report.id, detail: 'item no longer in Plex (already deleted or replaced): ' + report.url });
+  const m = key && (await plex(src, `/library/metadata/${key}`)).Metadata?.[0];
+  if (!m) return record({ status: 'skipped', reportId: report.id, source: label(report), detail: 'item no longer in Plex (already deleted or replaced): ' + report.url });
   const title = `${m.grandparentTitle ? m.grandparentTitle + ' ' : ''}${m.title}`;
   const files = new Set((m.Media ?? []).flatMap((x) => x.Part.map((p) => path.basename(p.file))));
-  const hit = await locate(c, m, files);
-  if (!hit) return record({ status: 'skipped', reportId: report.id, title, detail: 'no Sonarr/Radarr instance owns ' + [...files] });
+  const hit = await locate(c, m, files, src);
+  if (!hit) return record({ status: 'skipped', reportId: report.id, source: label(report), title, detail: 'no Sonarr/Radarr instance owns ' + [...files] });
   await swap(c, report, title, hit);
 }
 
@@ -202,24 +226,24 @@ async function locateIssue(c, issue) {
 }
 
 export async function replaceIssue(c, report) {
-  const { issue } = report;
+  const { issue, src } = report;
   const type = ISSUE_TYPE[issue.issueType] ?? 'other';
-  const label = `Overseerr issue #${issue.id}`;
-  if (!c.overseerrTypes.split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
-    return record({ status: 'skipped', reportId: report.id, detail: `${label}: ${type} issues are not set to be replaced` });
+  const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${issue.id}`;
+  if (!(src.issueTypes ?? 'video,audio,other').split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
+    return record({ status: 'skipped', reportId: report.id, source: label(report), detail: `${what}: ${type} issues are not set to be replaced` });
   }
   if (issue.media.mediaType === 'tv' && !issue.problemSeason) {
-    return record({ status: 'skipped', reportId: report.id, detail: `${label}: reported against the whole series, which is not replaced automatically` });
+    return record({ status: 'skipped', reportId: report.id, source: label(report), detail: `${what}: reported against the whole series, which is not replaced automatically` });
   }
   const hits = await locateIssue(c, issue);
-  if (!hits.length) return record({ status: 'skipped', reportId: report.id, detail: `${label}: no Sonarr/Radarr instance has a file for this title` });
+  if (!hits.length) return record({ status: 'skipped', reportId: report.id, source: label(report), detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
   for (const hit of hits) await swap(c, report, hit.title, hit);
-  if (c.dryRun || !c.overseerrResolve) return;
+  if (c.dryRun || src.resolve === false) return;
   try {
-    await overseerr(c, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}.` });
-    await overseerr(c, 'POST', `/issue/${issue.id}/resolved`);
-    record({ status: 'info', reportId: report.id, detail: `${label}: commented and resolved` });
-  } catch (e) { record({ status: 'error', reportId: report.id, detail: `${label}: could not comment/resolve: ${e.message}` }); }
+    await overseerr(src, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}.` });
+    await overseerr(src, 'POST', `/issue/${issue.id}/resolved`);
+    record({ status: 'info', reportId: report.id, source: label(report), detail: `${what}: commented and resolved` });
+  } catch (e) { record({ status: 'error', reportId: report.id, source: label(report), detail: `${what}: could not comment/resolve: ${e.message}` }); }
 }
 
 // Reports that existed before the app first ran: seen, but never acted on (no entry in the changes log).
@@ -237,35 +261,61 @@ async function act(c, s, r, { retryable = false } = {}) {
   if (s.day !== today) Object.assign(s, { day: today, count: 0 });
   if (s.count >= c.maxPerDay) {
     // a new report is marked handled so it is not retried forever; a historic one stays pending for the next click
-    if (!retryable) record({ status: 'skipped', reportId: r.id, detail: `daily cap ${c.maxPerDay} reached` });
+    if (!retryable) record({ status: 'skipped', reportId: r.id, source: label(r), detail: `daily cap ${c.maxPerDay} reached` });
     return false;
   }
   s.count++;
   writeJson(dataFile('state.json'), s);
-  await (r.source === 'overseerr' ? replaceIssue : replace)(c, r).catch((e) => record({ status: 'error', reportId: r.id, detail: e.message }));
+  await (r.kind === 'seerr' ? replaceIssue : replace)(c, r).catch((e) => record({ status: 'error', reportId: r.id, source: label(r), detail: e.message }));
   return true;
+}
+
+// A Plex server is told apart by its machine identifier: every report names the server it is about, and one Plex account
+// can own several servers, so each source only takes the reports for its own server.
+const machineIds = new Map();
+async function machineId(src) {
+  if (!machineIds.has(src.url)) {
+    const r = await fetch(`${src.url}/identity`, { headers: { 'X-Plex-Token': src.key, Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+    if (!r.ok) throw new Error(`could not identify the Plex server (HTTP ${r.status})`);
+    machineIds.set(src.url, (await r.json()).MediaContainer.machineIdentifier);
+  }
+  return machineIds.get(src.url);
 }
 
 // Fetch every configured source; one being down must not stop the others.
 async function fetchSources(c) {
-  const nodes = [], ok = new Set(), errors = [];
-  const sources = [
-    ['plex', c.plexToken && (() => reports(c))],
-    ['overseerr', c.overseerrUrl && c.overseerrKey && (() => overseerrIssues(c))],
-  ];
-  for (const [name, get] of sources) {
-    if (!get) continue;
-    try { nodes.push(...(await get()).map((n) => ({ source: 'plex', ...n }))); ok.add(name); } catch (e) { errors.push(`${name}: ${e.message}`); }
+  const nodes = [], ok = new Set(), errors = [], seen = new Set();
+  for (const k of Object.keys(health)) if (k.startsWith('source:')) delete health[k];
+  for (const src of c.sources) {
+    const hk = `source:${src.name}`, at = new Date().toISOString();
+    if (!src.key || !src.url) { health[hk] = { ok: null, message: 'not configured', at }; continue; }
+    try {
+      const list = src.kind === 'plex'
+        ? await (async () => { const mid = await machineId(src); return (await reports(src)).filter((n) => n.url?.startsWith(`server://${mid}/`)).map((n) => ({ ...n, kind: 'plex', source: src.name, src })); })()
+        : await overseerrIssues(src);
+      for (const n of list) if (!seen.has(n.id)) { seen.add(n.id); nodes.push(n); }
+      ok.add(src.name); health[hk] = { ok: true, message: `${list.length} open`, at };
+    } catch (e) { errors.push(`${src.name}: ${e.message}`); health[hk] = { ok: false, message: e.message, at }; }
   }
   return { nodes: nodes.sort((x, y) => x.date.localeCompare(y.date)), ok, errors };
 }
 
+// *arr instances are not needed until a report arrives, so check them every few minutes to keep the status page honest.
+async function checkArrs(c) {
+  if (Date.now() - lastArrCheck < ARR_CHECK_MS) return;
+  lastArrCheck = Date.now();
+  const results = await Promise.all(c.arrs.map((a) => runCheck(c, { target: 'arr', name: a.name, kind: a.kind, url: a.url, key: '' })));
+  for (const k of Object.keys(health)) if (k.startsWith('arr:')) delete health[k];
+  c.arrs.forEach((a, i) => { health[`arr:${a.name}`] = { ok: results[i].ok, message: results[i].message, at: new Date().toISOString() }; });
+}
+
 export async function poll() {
   const c = getConfig();
-  if (!(c.plexToken || (c.overseerrUrl && c.overseerrKey)) || !c.arrs.length) {
-    throw new Error('not configured: set a Plex token or Overseerr URL and key, and at least one Sonarr/Radarr instance');
+  if (!c.sources.some((s) => s.key && s.url) || !c.arrs.length) {
+    throw new Error('not configured: add a Plex or Overseerr/Seerr source (with its token or key) and at least one Sonarr, Radarr or Lidarr instance');
   }
   const { nodes, ok, errors } = await fetchSources(c);
+  await checkArrs(c);
   if (!ok.size) throw new Error(errors.join('; '));
   const s = readJson(dataFile('state.json'), null) ?? { seen: [], day: '', count: 0, sources: [] };
   s.sources ??= ['plex']; // state files from before Overseerr support only ever saw Plex
@@ -352,8 +402,10 @@ export function serve() {
       // Route on the /api/... suffix, so it works under any prefix whether or not the proxy strips it.
       const route = url.pathname.match(/\/api\/(state|env|config|historic|test)$/)?.[0].slice(5) ?? '';
       if (route === 'state') {
+        const c = getConfig();
         return send(200, 'application/json', JSON.stringify({
           config: publicConfig(), locked: lockedKeys(), status, version: VERSION, uiConfigured: hasFileConfig(), authEnabled: !!pass,
+          today: todayCount(c), health: currentHealth(c), pollSeconds: c.pollSeconds,
           changes: readJson(dataFile('changes.json'), []).reverse(),
         }));
       }
@@ -366,7 +418,12 @@ export function serve() {
         // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
         if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return send(415, 'application/json', '{"error":"content-type must be application/json"}');
         if (req.headers.origin && !sameOrigin(req, baseHost)) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
-        if (route === 'test') return send(200, 'application/json', JSON.stringify(await runCheck(getConfig(), JSON.parse(await body(req)))));
+        if (route === 'test') {
+          const req2 = JSON.parse(await body(req)), result = await runCheck(getConfig(), req2);
+          const prefix = { source: 'source', arr: 'arr', client: 'client' }[req2.target];
+          if (prefix && req2.name) health[`${prefix}:${req2.name}`] = { ok: result.ok, message: result.message, at: new Date().toISOString() }; // so the status page shows it too
+          return send(200, 'application/json', JSON.stringify(result));
+        }
         if (route === 'historic') { historicRequested = true; wake?.(); return send(202, 'application/json', '{}'); }
         saveConfig(JSON.parse(await body(req)));
         return send(200, 'application/json', '{}');

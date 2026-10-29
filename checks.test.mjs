@@ -44,15 +44,15 @@ const sab = await listen((req, res) => {
   return u.searchParams.get('apikey') === S.sab ? json(res, { queue: {} }) : res.writeHead(403).end();
 });
 
-const base = { plexUrl: '', plexToken: '', overseerrUrl: '', overseerrKey: '', arrs: [], clients: [], qbitUrl: '', qbitUsername: '', qbitPassword: '', sabUrl: '', sabApiKey: '' };
+const base = { sources: [], arrs: [], clients: [] };
 const leaks = (r) => Object.values(S).some((v) => r.message.includes(v));
 
 test('Plex: server and plex.tv token are both checked', async () => {
-  const good = await runCheck(base, { target: 'plex', plexUrl: url(plex) + '/', plexToken: S.plex });
+  const good = await runCheck(base, { target: 'source', kind: 'plex', name: '', url: url(plex) + '/', key: S.plex });
   assert.deepEqual([good.ok, good.message], [true, 'Plex "Home" 1.43.5: token accepted, reports readable']);
-  const bad = await runCheck(base, { target: 'plex', plexUrl: url(plex), plexToken: S.wrong });
+  const bad = await runCheck(base, { target: 'source', kind: 'plex', name: '', url: url(plex), key: S.wrong });
   assert.equal(bad.ok, false); assert.match(bad.message, /Plex server: the token was refused \(HTTP 401\)/);
-  assert.match((await runCheck(base, { target: 'plex', plexUrl: '', plexToken: '' })).message, /Set a URL and a token first/);
+  assert.match((await runCheck(base, { target: 'source', kind: 'plex', name: '', url: '', key: '' })).message, /Set a URL and a token first/);
 });
 
 test('Sonarr/Radarr: key checked, and a Radarr set up as Sonarr is caught', async () => {
@@ -65,7 +65,7 @@ test('Sonarr/Radarr: key checked, and a Radarr set up as Sonarr is caught', asyn
 
 test('missing settings are named properly', async () => {
   assert.equal((await runCheck(base, { target: 'client', kind: 'sabnzbd', name: '', url: 'http://x', apiKey: '' })).message, 'Set an API key first');
-  assert.equal((await runCheck(base, { target: 'overseerr' })).message, 'Set a URL and an API key first');
+  assert.equal((await runCheck(base, { target: 'source', kind: 'seerr' })).message, 'Set a URL and an API key first');
 });
 
 test('Lidarr is checked on its v1 API', async () => {
@@ -75,8 +75,8 @@ test('Lidarr is checked on its v1 API', async () => {
 });
 
 test('Overseerr: key must be able to read issues', async () => {
-  assert.match((await runCheck(base, { target: 'overseerr', overseerrUrl: url(overseerr), overseerrKey: S.os })).message, /^Overseerr\/Seerr 1\.34\.0: API key accepted/);
-  const bad = await runCheck(base, { target: 'overseerr', overseerrUrl: url(overseerr), overseerrKey: S.wrong });
+  assert.match((await runCheck(base, { target: 'source', kind: 'seerr', name: '', url: url(overseerr), key: S.os })).message, /^Overseerr\/Seerr 1\.34\.0: API key accepted/);
+  const bad = await runCheck(base, { target: 'source', kind: 'seerr', name: '', url: url(overseerr), key: S.wrong });
   assert.equal(bad.ok, false); assert.match(bad.message, /refused or cannot view issues/);
 });
 
@@ -93,15 +93,17 @@ test('a refused qBittorrent login is caught even if a cookie comes back', async 
 });
 
 test('blank secrets in the form fall back to the saved ones; the form wins when filled in', async () => {
-  const saved = { ...base, plexToken: S.plex, overseerrKey: S.os, qbitPassword: S.qb, sabApiKey: S.sab,
+  const saved = { sources: [{ name: 'tv-plex', kind: 'plex', url: url(plex), key: S.plex }, { name: 'requests', kind: 'seerr', url: url(overseerr), key: S.os }],
     arrs: [{ name: 's', kind: 'sonarr', url: url(sonarr), key: S.arr }],
-    clients: [{ name: 'qb2', kind: 'qbittorrent', url: url(qbit), username: 'a', password: S.qb, apiKey: '' }] };
-  assert.equal((await runCheck(saved, { target: 'plex', plexUrl: url(plex), plexToken: '' })).ok, true);
-  assert.equal((await runCheck(saved, { target: 'overseerr', overseerrUrl: url(overseerr), overseerrKey: '' })).ok, true);
+    clients: [{ name: 'qb2', kind: 'qbittorrent', url: url(qbit), username: 'a', password: S.qb, apiKey: '' },
+      { name: 'qbittorrent', kind: 'qbittorrent', url: url(qbit), username: 'a', password: S.qb, apiKey: '', default: true },
+      { name: 'sabnzbd', kind: 'sabnzbd', url: url(sab), username: '', password: '', apiKey: S.sab, default: true }] };
+  assert.equal((await runCheck(saved, { target: 'source', kind: 'plex', name: 'tv-plex', url: url(plex), key: '' })).ok, true);
+  assert.equal((await runCheck(saved, { target: 'source', kind: 'seerr', name: 'requests', url: url(overseerr), key: '' })).ok, true);
   assert.equal((await runCheck(saved, { target: 'arr', name: 's', kind: 'sonarr', url: url(sonarr), key: '' })).ok, true);
   assert.equal((await runCheck(saved, { target: 'client', kind: 'qbittorrent', name: 'qb2', url: '', username: '', password: '' })).ok, true, 'saved client by name');
-  assert.equal((await runCheck(saved, { target: 'client', kind: 'qbittorrent', name: '', url: url(qbit), username: 'a', password: '' })).ok, true, 'default qBittorrent password');
-  assert.equal((await runCheck(saved, { target: 'client', kind: 'sabnzbd', name: '', url: url(sab), apiKey: '' })).ok, true, 'default SABnzbd key');
+  assert.equal((await runCheck(saved, { target: 'client', kind: 'qbittorrent', name: 'qbittorrent', url: url(qbit), username: 'a', password: '' })).ok, true, 'default qBittorrent password');
+  assert.equal((await runCheck(saved, { target: 'client', kind: 'sabnzbd', name: 'sabnzbd', url: url(sab), apiKey: '' })).ok, true, 'default SABnzbd key');
   assert.equal((await runCheck(saved, { target: 'arr', name: 's', kind: 'sonarr', url: url(sonarr), key: S.wrong })).ok, false, 'typed value wins');
 });
 
@@ -109,8 +111,8 @@ test('unreachable hosts fail with a reason, and messages never contain secrets',
   const dead = await listen(() => {}); const closed = url(dead); dead.close();
   const rs = [
     await runCheck(base, { target: 'arr', name: 's', kind: 'sonarr', url: closed, key: S.arr }),
-    await runCheck(base, { target: 'overseerr', overseerrUrl: closed, overseerrKey: S.os }),
-    await runCheck(base, { target: 'plex', plexUrl: closed, plexToken: S.plex }),
+    await runCheck(base, { target: 'source', kind: 'seerr', name: '', url: closed, key: S.os }),
+    await runCheck(base, { target: 'source', kind: 'plex', name: '', url: closed, key: S.plex }),
     await runCheck(base, { target: 'client', kind: 'sabnzbd', name: '', url: closed, apiKey: S.sab }),
     await runCheck(base, { target: 'client', kind: 'qbittorrent', name: '', url: closed, username: 'a', password: S.qb }),
     await runCheck(base, { target: 'arr', name: 's', kind: 'sonarr', url: url(sonarr), key: S.wrong }),

@@ -5,233 +5,458 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reportarr</title>
 <style>
-  :root { --bg:#fff; --fg:#1b1e23; --muted:#6b7280; --card:#f4f5f7; --line:#d9dce1; --accent:#b8780a; --bad:#b42318; --ok:#157f3b; color-scheme: light; }
-  :root[data-theme="dark"] { --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --accent:#e5a00d; --bad:#f97066; --ok:#4ade80; color-scheme: dark; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --accent:#e5a00d; --bad:#f97066; --ok:#4ade80; color-scheme: dark; } }
+  :root {
+    --bg:#ffffff; --fg:#1b1e23; --muted:#6b7280; --card:#f4f5f7; --line:#d9dce1; --line2:#eceef1;
+    --accent:#b8780a; --ok:#157f3b; --bad:#b42318; --track:#e3e5e9; --off:#c5c9d0; --dim:#9aa0a6; --neutral:#4b5260;
+    --warnbg:#fbf3e4; --accbg:#fbf1df; --acctext:#8f5d07; --accborder:#e9cf9c; --okbg:#e5f3ea; --badbg:#fcebe9;
+    --errbg:#fcefed; --errborder:#e8b4ae; --errtext:#8a1c12; --envbg:#eef0f3; --bar:rgba(255,255,255,.94);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --line2:#262b31;
+    --accent:#e5a00d; --ok:#4ade80; --bad:#f97066; --track:#2f353c; --off:#3a4049; --dim:#6b7280; --neutral:#c3c7cd;
+    --warnbg:#2a2416; --accbg:#2e2512; --acctext:#e5a00d; --accborder:#5a4517; --okbg:#15291d; --badbg:#2e1b1a;
+    --errbg:#2c1c1c; --errborder:#5c2b27; --errtext:#f4a59d; --envbg:#1a1d21; --bar:rgba(20,22,25,.94);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --line2:#262b31;
+    --accent:#e5a00d; --ok:#4ade80; --bad:#f97066; --track:#2f353c; --off:#3a4049; --dim:#6b7280; --neutral:#c3c7cd;
+    --warnbg:#2a2416; --accbg:#2e2512; --acctext:#e5a00d; --accborder:#5a4517; --okbg:#15291d; --badbg:#2e1b1a;
+    --errbg:#2c1c1c; --errborder:#5c2b27; --errtext:#f4a59d; --envbg:#1a1d21; --bar:rgba(20,22,25,.94);
+    color-scheme: dark;
+  } }
   * { box-sizing: border-box; }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
-  .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-  h1 { font-size:20px; } h2 { font-size:16px; margin:28px 0 10px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
-  .muted { color:var(--muted); font-size:13px; }
-  .badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
-  .warn { border-color:var(--accent); margin:0 0 12px; }
-  .error { color:var(--bad); } .ok { color:var(--ok); }
-  .table { overflow-x:auto; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
-  label { display:block; font-size:13px; color:var(--muted); }
-  input, select { width:100%; padding:7px 9px; margin-top:3px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
-  input[type=checkbox] { width:auto; margin-right:6px; }
-  input:disabled { opacity:.6; }
-  button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#111; font:inherit; font-weight:600; cursor:pointer; }
-  a.btn { display:inline-block; padding:8px 14px; border:1px solid var(--line); border-radius:6px; color:var(--fg); font-weight:600; text-decoration:none; }
-  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
-  .client { display:grid; grid-template-columns:1fr 120px 2fr 1fr 1fr 1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
-  .addrow { display:flex; flex-wrap:wrap; gap:8px; }
-  .tests { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  .rowtest { grid-column:1 / -1; font-size:13px; margin:-4px 0 4px; }
-  .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
-  @media (max-width:700px) { .arr, .client { grid-template-columns:1fr 1fr; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; min-height:100vh; }
+  code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.92em; }
+  a { color:var(--accent); }
+  input, select, button { font:inherit; }
+  h1, h2, h3, p { margin:0; }
+  .wrap { max-width:1040px; margin-inline:auto; padding:16px 16px 0; display:flex; flex-direction:column; gap:16px; }
+  .col { display:flex; flex-direction:column; }
+  .row { display:flex; flex-wrap:wrap; align-items:center; }
+  .muted { color:var(--muted); }
+  .hidden { display:none !important; }
+
+  header.top { justify-content:space-between; gap:12px; padding:4px 0; }
+  h1 { font-size:20px; font-weight:700; letter-spacing:-.01em; }
+  .pill { padding:2px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+  .mode { display:flex; align-items:center; gap:7px; padding:6px 12px; border-radius:99px; font-size:13px; font-weight:700; letter-spacing:.04em; cursor:pointer; border:1px solid; }
+  .mode i { width:8px; height:8px; border-radius:50%; background:currentColor; }
+  .mode.dry { background:var(--accbg); color:var(--acctext); border-color:var(--accborder); }
+  .mode.live { background:var(--badbg); color:var(--bad); border-color:var(--errborder); }
+  .mode:disabled { cursor:default; opacity:.8; }
+  .btn { padding:5px 11px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .btn:disabled { opacity:.6; cursor:default; }
+  .btn.danger { color:var(--bad); }
+  .btn.ghost { background:transparent; padding:6px 12px; }
+
+  .warn { display:flex; gap:12px; align-items:flex-start; border:1px solid var(--accent); background:var(--warnbg); border-radius:10px; padding:12px 14px; font-size:14px; }
+  .warn b.i { flex:none; width:20px; height:20px; border-radius:50%; background:var(--accent); color:#fff; font-size:13px; display:grid; place-items:center; margin-top:1px; }
+
+  nav.tabs { display:flex; gap:4px; flex-wrap:wrap; box-shadow:inset 0 -1px 0 var(--line); margin-top:-4px; }
+  nav.tabs button { flex:none; padding:10px 14px; border:0; background:transparent; font-size:14px; font-weight:600; color:var(--muted); cursor:pointer; display:flex; align-items:center; gap:6px; box-shadow:inset 0 -2px 0 transparent; }
+  nav.tabs button.on { color:var(--fg); box-shadow:inset 0 -2px 0 var(--accent); }
+  nav.tabs .alert { width:7px; height:7px; border-radius:50%; background:var(--bad); }
+
+  .grid3 { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap:12px; }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:6px; }
+  .tile .lbl { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+  .tile .big { font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .tile .sub { font-size:13px; color:var(--muted); }
+  .pulse { width:9px; height:9px; border-radius:50%; animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.35 } }
+  .bar { height:6px; border-radius:99px; background:var(--track); overflow:hidden; }
+  .bar > div { height:100%; background:var(--accent); border-radius:99px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:99px; font-size:12px; background:var(--bg); border:1px solid var(--line); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--dim); flex:none; }
+  .chip .dot { width:7px; height:7px; }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); } .dot.dim { background:var(--dim); }
+
+  .errbanner { gap:8px 14px; justify-content:space-between; border:1px solid var(--errborder); background:var(--errbg); border-radius:10px; padding:12px 14px; font-size:14px; color:var(--errtext); }
+  .errbanner > div { flex:1 1 300px; }
+  .errbanner a { font-weight:600; color:var(--bad); }
+
+  h2 { font-size:16px; }
+  .changes-head { justify-content:space-between; align-items:flex-end; gap:10px; margin-top:12px; }
+  .seg { display:flex; flex-wrap:wrap; gap:4px; padding:3px; background:var(--card); border:1px solid var(--line); border-radius:8px; }
+  .seg button { display:flex; align-items:center; gap:6px; padding:5px 10px; border:0; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; background:transparent; color:var(--muted); }
+  .seg button.on { background:var(--bg); color:var(--fg); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .seg button span { font-size:12px; font-weight:500; color:var(--muted); }
+  .callout { gap:8px 14px; padding:10px 14px; border:1px dashed var(--line); border-radius:10px; font-size:14px; }
+  .callout > span { flex:1 1 260px; color:var(--muted); }
+  .callout strong { color:var(--fg); }
+  .list { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg); }
+  .lhead { display:flex; gap:14px; padding:8px 14px; background:var(--card); border-bottom:1px solid var(--line); font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .lhead span:nth-child(1) { flex:0 0 118px; } .lhead span:nth-child(2) { flex:1 1 auto; } .lhead span:nth-child(3) { flex:0 0 110px; text-align:right; }
+  .item { display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px 14px; padding:11px 14px; border-bottom:1px solid var(--line2); }
+  .item:last-child { border-bottom:0; }
+  .item .st { flex:0 0 118px; display:flex; }
+  .status { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; }
+  .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .s-replaced { background:var(--okbg); color:var(--ok); } .s-dry { background:var(--accbg); color:var(--acctext); }
+  .s-skipped, .s-other { background:var(--line2); color:var(--neutral); } .s-failed { background:var(--badbg); color:var(--bad); }
+  .item .body { flex:1 1 260px; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
+  .item .t b { font-size:14px; }
+  .item .t span, .item .d { font-size:13px; color:var(--muted); }
+  .item .t span { font-size:12px; }
+  .item code { color:var(--fg); background:var(--card); padding:0 5px; border-radius:4px; }
+  .item .when { flex:0 0 110px; text-align:right; font-size:13px; color:var(--muted); margin-left:auto; }
+  .empty { padding:28px 14px; text-align:center; font-size:14px; color:var(--muted); }
+
+  .head { gap:4px; } .head p { font-size:13px; color:var(--muted); }
+  .env { display:inline-block; padding:0 6px; border-radius:99px; font-size:11px; border:1px solid var(--line); color:var(--muted); font-family:ui-monospace, monospace; }
+  .section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .sechead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }
+  .sechead h3 { font-size:15px; } .sechead .desc { font-size:13px; color:var(--muted); }
+  .sechead .grow { flex:1 1 300px; display:flex; flex-direction:column; }
+  .sechead .btn { flex:none; white-space:nowrap; }
+  .icard { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .ihead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }
+  .ihead .l { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+  .ihead .l b { font-size:14px; }
+  .ihead .r { display:flex; align-items:center; gap:10px; }
+  .res { font-size:13px; } .res.ok { color:var(--ok); } .res.bad { color:var(--bad); } .res.wait { color:var(--muted); }
+  .fields { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:10px; }
+  .fields.wide { grid-template-columns:repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap:12px; }
+  label.f { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
+  label.f .hint { font-size:12px; }
+  label.f .lbl { display:flex; align-items:center; gap:6px; }
+  input, select { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  input:disabled, select:disabled { background:var(--envbg); }
+  .empty-dash { padding:18px; text-align:center; font-size:13px; color:var(--muted); border:1px dashed var(--line); border-radius:8px; }
+  .switch { display:flex; align-items:center; gap:10px; padding:2px 0; border:0; background:transparent; font-size:13px; color:var(--fg); text-align:left; cursor:pointer; align-self:flex-start; }
+  .switch:disabled { cursor:default; opacity:.7; }
+  .switch .track { flex:none; width:34px; height:20px; border-radius:99px; background:var(--off); position:relative; transition:background .15s; }
+  .switch .track::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); transition:left .15s; }
+  .switch[aria-checked="true"] .track { background:var(--accent); }
+  .switch[aria-checked="true"] .track::after { left:16px; }
+  .switch b { font-weight:600; display:block; } .switch small { color:var(--muted); font-size:12px; display:block; }
+  .envrow { gap:8px 14px; padding:10px 0 4px; font-size:13px; color:var(--muted); }
+  .envrow a { font-weight:600; } .envrow span { flex:1 1 300px; }
+
+  .savebar { position:sticky; bottom:0; margin-top:20px; border-top:1px solid var(--line); background:var(--bar); backdrop-filter:blur(6px); }
+  .savebar > div { max-width:1040px; margin-inline:auto; padding:10px 16px; display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:12px; }
+  .savebar .msg { font-size:13px; margin-right:auto; }
+  .save { padding:9px 18px; border:0; border-radius:6px; background:var(--accent); color:#111; font-weight:600; cursor:pointer; }
+  .save:disabled { opacity:.6; cursor:default; }
 </style>
-<script>
-// apply the saved theme before first paint to avoid a flash; 'auto' follows the OS
-try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch {}
-</script>
 </head>
 <body>
-<div class="top"><h1>Reportarr <span class="badge" id="version"></span></h1><button type="button" class="ghost" id="theme" title="Switch between automatic, dark and light"></button></div>
-<p id="openwarn" class="card warn" hidden><strong>No login is set.</strong> Anyone who can reach this page can change settings, download your API keys and trigger deletions. Set <code>UI_USERNAME</code> and <code>UI_PASSWORD</code> to require one.</p>
-<div id="status" class="card"></div>
+<div class="wrap">
+  <header class="top row">
+    <div class="row" style="gap:10px"><h1>Reportarr</h1><span class="pill" id="version"></span></div>
+    <div class="row" style="gap:8px"><button type="button" class="mode dry" id="mode"></button><button type="button" class="btn ghost" id="theme" title="Switch between automatic, dark and light"></button></div>
+  </header>
 
-<h2>Changes</h2>
-<p id="historic" hidden><button type="button" id="historicbtn"></button> <span id="historicmsg" class="muted"></span></p>
-<div class="card table"><table id="changes"></table></div>
+  <div class="warn hidden" id="openwarn"><b class="i">!</b><div><strong>No login is set.</strong> Anyone who can reach this page can change settings, download your API keys and trigger deletions. Set <code>UI_USERNAME</code> and <code>UI_PASSWORD</code> to require one.</div></div>
 
-<h2>Settings</h2>
-<form id="form" class="card">
-  <p class="muted">Fields marked <span class="badge">env</span> are set in the container environment and can only be changed there. Secrets are never shown; leave blank to keep the current value.</p>
-  <div class="grid" id="fields"></div>
-  <p class="tests">
-    <button type="button" class="ghost" data-test="plex">Test Plex</button>
-    <button type="button" class="ghost" data-test="overseerr">Test Overseerr</button>
-    <button type="button" class="ghost" data-test="qbit">Test qBittorrent (default)</button>
-    <button type="button" class="ghost" data-test="sab">Test SABnzbd (default)</button>
-    <span id="testresult" class="muted" role="status"></span>
-  </p>
-  <h3>Sonarr / Radarr / Lidarr instances</h3>
-  <p class="muted">Instances set in the environment are read-only. Anything you add here is kept alongside them.</p>
-  <div id="arrs"></div>
-  <span class="addrow">
-    <button type="button" class="ghost" data-add="sonarr">Add Sonarr</button>
-    <button type="button" class="ghost" data-add="radarr">Add Radarr</button>
-    <button type="button" class="ghost" data-add="lidarr">Add Lidarr</button>
-  </span>
-  <h3>Download clients</h3>
-  <p class="muted">For moving the replacement to the top of the queue. Each is matched to the one Sonarr/Radarr uses by host:port (or name). The "default" fields above apply when none match.</p>
-  <div id="clients"></div>
-  <button type="button" class="ghost" id="addclient">Add download client</button>
-  <p><button type="submit">Save</button> <span id="msg" class="muted"></span></p>
-  <p id="envbox" hidden><a class="btn" id="envlink" href="api/env" download="reportarr.env">Download .env</a>
-    <span class="muted">Your settings as a file for docker compose. It contains your API keys and passwords, so keep it private. Rename it to <code>.env</code> (browsers drop the leading dot), put it next to <code>docker-compose.yml</code> and restart: the settings then come from there and show as read-only here.</span></p>
-</form>
+  <nav class="tabs" id="tabs"></nav>
+
+  <div id="activity" class="col" style="gap:16px">
+    <section class="grid3" id="strip"></section>
+    <div class="errbanner row hidden" id="errbanner"></div>
+    <section class="col" style="gap:10px">
+      <div class="changes-head row"><h2>Changes</h2><div class="seg" id="filters"></div></div>
+      <div class="callout row hidden" id="historic"><span id="historictext"></span><button type="button" class="btn" id="historicbtn"></button></div>
+      <div class="list"><div class="lhead"><span>Status</span><span>Title</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
+    </section>
+  </div>
+
+  <section id="settings" class="col hidden" style="gap:12px">
+    <div class="col head"><h2 id="tabtitle"></h2><p>Fields marked <span class="env">env</span> come from the container environment and are read-only here. Secrets are never shown; leave blank to keep the current value.</p></div>
+    <div id="panel" class="col" style="gap:12px"></div>
+  </section>
+</div>
+
+<div class="savebar hidden" id="savebar"><div><span class="msg" id="savemsg"></span><button type="button" class="save" id="save">Save</button></div></div>
 
 <script>
-const FIELDS = [
-  ['plexUrl', 'Plex URL', 'text'], ['plexToken', 'Plex token', 'password'],
-  ['pollSeconds', 'Poll interval (seconds)', 'number'], ['maxPerDay', 'Max replacements per day', 'number'],
-  ['dryRun', 'Dry run (log only, never delete)', 'checkbox'],
-  ['overseerrUrl', 'Overseerr/Seerr URL', 'text'], ['overseerrKey', 'Overseerr/Seerr API key', 'password'],
-  ['overseerrTypes', 'Overseerr issue types to replace (video, audio, subtitles, other)', 'text'],
-  ['overseerrResolve', 'Comment on and resolve Overseerr issues after replacing', 'checkbox'],
-  ['qbitUrl', 'qBittorrent URL (default)', 'text'], ['qbitUsername', 'qBittorrent username (default)', 'text'],
-  ['qbitPassword', 'qBittorrent password (default)', 'password'],
-  ['sabUrl', 'SABnzbd URL (default)', 'text'], ['sabApiKey', 'SABnzbd API key (default)', 'password'],
-];
 // Work out where the app is mounted from the URL the page was loaded at, so it runs under any reverse proxy path
 // prefix (https://host/reportarr or https://host/reportarr/) without configuration.
 const BASE = "__BASE_URL__" || (location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'); // BASE_URL when set, else where the page was loaded from
 const api = (name) => BASE + 'api/' + name;
-document.getElementById('envlink').href = api('env');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (id) => document.getElementById(id);
 
+// ---- theme: auto follows the OS (CSS), dark/light force it; remembered in the browser
 const THEMES = ['auto', 'dark', 'light'];
-const ICON = { auto: 'Theme: auto', dark: 'Theme: dark', light: 'Theme: light' };
 let theme = 'auto';
 try { theme = localStorage.getItem('theme') || 'auto'; } catch {}
 function applyTheme() {
   if (theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
-  document.getElementById('theme').textContent = ICON[theme];
+  $('theme').textContent = 'Theme: ' + theme;
 }
-document.getElementById('theme').onclick = () => {
-  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
-  try { localStorage.setItem('theme', theme); } catch {}
-  applyTheme();
-};
+$('theme').onclick = () => { theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; try { localStorage.setItem('theme', theme); } catch {} applyTheme(); };
 applyTheme();
 
-let state, arrs = [], clients = [];
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---- state
+let state = null;       // what the server last said
+let draft = null;       // the settings being edited (not saved until Save)
+let dirty = false, saveMsg = '', saveErr = false;
+let tab = 'activity', filter = 'all', uid = 0;
+const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
+const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients']];
+const KINDS = {
+  sources: { plex: 'Plex', seerr: 'Overseerr / Seerr' },
+  arrs: { sonarr: 'Sonarr', radarr: 'Radarr', lidarr: 'Lidarr' },
+  clients: { qbittorrent: 'qBittorrent', sabnzbd: 'SABnzbd' },
+};
+const PREFIX = { plex: 'plex', seerr: 'seerr', sonarr: 'sonarr', radarr: 'radarr', lidarr: 'lidarr', qbittorrent: 'qbit', sabnzbd: 'sab' };
+const URLS = { plex: 'http://plex:32400', seerr: 'http://overseerr:5055', sonarr: 'http://sonarr:8989', radarr: 'http://radarr:7878', lidarr: 'http://lidarr:8686', qbittorrent: 'http://qbittorrent:8080', sabnzbd: 'http://sabnzbd:8080' };
+const HKEY = { sources: 'source', arrs: 'arr', clients: 'client' };
+const locked = (k) => state.locked.includes(k);
 
-function renderLog() {
-  document.getElementById('openwarn').hidden = state.authEnabled !== false;
-  document.getElementById('version').textContent = state.version;
-  const { config: c, status, changes } = state;
-  document.getElementById('status').innerHTML =
-    `<span class="badge">${c.dryRun ? 'DRY RUN' : 'LIVE'}</span> last poll: ${esc(status.lastPoll ?? 'never')}` +
-    (status.lastError ? ` <span class="error">· ${esc(status.lastError)}</span>` : ' <span class="ok">· ok</span>');
-  document.getElementById('changes').innerHTML = changes.length
-    ? '<tr><th>Time</th><th>Status</th><th>Title</th><th>Instance</th><th>Detail</th></tr>' +
-      changes.map((r) => `<tr><td>${esc(new Date(r.time).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.title)}</td><td>${esc(r.instance)}</td><td>${esc(r.detail)}</td></tr>`).join('')
-    : '<tr><td class="muted">Nothing yet. Only new Plex reports are acted on.</td></tr>';
-  const n = status.historic || 0;
-  document.getElementById('historic').hidden = !n;
-  document.getElementById('historicbtn').textContent = `${c.dryRun ? 'Dry-run' : 'Action'} ${n} existing report${n === 1 ? '' : 's'}`;
+function newDraft() {
+  const c = state.config;
+  draft = { pollSeconds: c.pollSeconds, maxPerDay: c.maxPerDay, dryRun: c.dryRun };
+  for (const l of ['sources', 'arrs', 'clients']) draft[l] = c[l].map((x) => ({ ...x, _id: ++uid }));
 }
+const find = (list, id) => draft[list].find((x) => x._id === +id);
+const markDirty = () => { if (!dirty) { dirty = true; saveMsg = ''; saveErr = false; paintSave(); } };
 
-function render() {
-  renderLog();
-  document.getElementById('envbox').hidden = !state.uiConfigured;
-  const { config: c, locked } = state;
-  document.getElementById('fields').innerHTML = FIELDS.map(([k, label, type]) => {
-    const lock = locked.includes(k), set = c[k + 'Set'];
-    const attrs = type === 'checkbox' ? (c[k] ? 'checked' : '') : `value="${esc(c[k])}"`;
-    const ph = type === 'password' ? ` placeholder="${set ? '(set)' : ''}"` : '';
-    return `<label>${type === 'checkbox' ? `<input type="checkbox" name="${k}" ${attrs} ${lock ? 'disabled' : ''}>${label}`
-      : `${label}${lock ? ' <span class="badge">env</span>' : ''}<input type="${type}" name="${k}" ${attrs}${ph} ${lock ? 'disabled' : ''}>`}</label>`;
+// ---- small helpers
+const rel = (iso) => {
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  return min < 1 ? 'just now' : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : `${Math.round(min / 1440)} d ago`;
+};
+const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
+const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
+const statusKind = (r) => ({ replaced: 'replaced', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
+const STATUS_LABEL = { replaced: 'Replaced', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
+const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
+const failing = () => [
+  ...state.config.sources.map((x) => ['sources', x.name]), ...state.config.arrs.map((x) => ['arrs', x.name]), ...state.config.clients.map((x) => ['clients', x.name]),
+].filter(([l, n]) => healthOf(l, n)?.ok === false);
+const TAB_OF = { sources: 'sources', arrs: 'arr', clients: 'clients' };
+
+// ---- header
+function paintHeader() {
+  $('version').textContent = state.version;
+  $('openwarn').classList.toggle('hidden', state.authEnabled !== false);
+  const m = $('mode');
+  m.className = 'mode ' + (draft.dryRun ? 'dry' : 'live'); m.disabled = locked('dryRun');
+  m.title = locked('dryRun') ? 'DRY_RUN is set in the environment' : 'Click to switch; saved with Save';
+  m.innerHTML = `<i></i>${draft.dryRun ? 'DRY RUN' : 'LIVE'}`;
+  const bad = new Set(failing().map(([l]) => TAB_OF[l]));
+  $('tabs').innerHTML = TABS.map(([k, label]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${label}${bad.has(k) ? '<span class="alert"></span>' : ''}</button>`).join('');
+}
+$('mode').onclick = () => { draft.dryRun = !draft.dryRun; markDirty(); paintHeader(); if (tab === 'app') renderPanel(); };
+$('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) location.hash = b.dataset.tab; };
+
+// ---- activity tab
+function paintActivity() {
+  const bad = failing(), issues = bad.length + (state.status.lastError ? 1 : 0);
+  const t = state.today, pct = t.max ? Math.min(100, Math.round((t.count / t.max) * 100)) : 100;
+  const chips = [...state.config.sources.map((x) => ['sources', x]), ...state.config.arrs.map((x) => ['arrs', x]), ...state.config.clients.map((x) => ['clients', x])]
+    .map(([l, x]) => { const h = healthOf(l, x.name); return `<span class="chip" title="${esc(h?.message ?? 'not checked yet')}"><span class="dot ${dotClass(h)}"></span>${esc(x.name)}</span>`; }).join('');
+  $('strip').innerHTML = `
+    <div class="tile"><div class="lbl">Polling</div><div class="big"><span class="pulse" style="background:var(${issues ? '--accent' : '--ok'})"></span>${issues ? `Running, ${issues} issue${issues === 1 ? '' : 's'}` : 'Healthy'}</div>
+      <div class="sub">${state.status.lastPoll ? `Last poll ${esc(rel(state.status.lastPoll))} · every ${state.pollSeconds} s` : 'Waiting for the first poll'}</div></div>
+    <div class="tile"><div class="lbl">Today</div><div class="big">${t.count} <span class="muted" style="font-size:14px;font-weight:400">of ${t.max} replacements</span></div><div class="bar"><div style="width:${pct}%"></div></div></div>
+    <div class="tile"><div class="lbl">Connections</div><div class="chips">${chips || '<span class="sub">Nothing configured yet</span>'}</div></div>`;
+
+  const eb = $('errbanner');
+  if (state.status.lastError) {
+    const go = /not configured/.test(state.status.lastError) ? 'sources' : 'app';
+    eb.innerHTML = `<div><strong>Polling hit a problem.</strong> <span class="muted">${esc(state.status.lastError)}</span></div><a href="#${go}">Check settings →</a>`;
+  } else if (bad.length) {
+    const [l, n] = bad[0];
+    eb.innerHTML = `<div><strong>${esc(n)} is failing.</strong>${bad.length > 1 ? ` (and ${bad.length - 1} more)` : ''} <span class="muted">${esc(healthOf(l, n).message)}</span></div><a href="#${TAB_OF[l]}">Check settings →</a>`;
+  }
+  eb.classList.toggle('hidden', !(state.status.lastError || bad.length));
+
+  const all = state.changes, counts = { all: all.length };
+  for (const k of ['replaced', 'dry', 'skipped', 'failed']) counts[k] = all.filter((r) => statusKind(r) === k).length;
+  $('filters').innerHTML = [['all', 'All'], ['replaced', 'Replaced'], ['dry', 'Dry run'], ['skipped', 'Skipped'], ['failed', 'Failed']]
+    .map(([k, l]) => `<button type="button" data-filter="${k}" class="${filter === k ? 'on' : ''}">${l}<span>${counts[k]}</span></button>`).join('');
+
+  const n = state.status.historic;
+  $('historic').classList.toggle('hidden', !(n > 0));
+  if (n > 0) {
+    $('historictext').innerHTML = `<strong>${n} report${n === 1 ? '' : 's'}</strong> ${n === 1 ? 'was' : 'were'} already open when Reportarr started and haven't been touched.`;
+    if (!$('historicbtn').dataset.started) $('historicbtn').textContent = `${state.config.dryRun ? 'Dry-run' : 'Action'} ${n} existing report${n === 1 ? '' : 's'}`;
+  }
+
+  const rows = filter === 'all' ? all : all.filter((r) => statusKind(r) === filter);
+  $('rows').innerHTML = rows.map((r) => {
+    const k = statusKind(r), label = STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1));
+    return `<div class="item"><span class="st"><span class="status s-${k}"><i></i>${esc(label)}</span></span>
+      <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
+      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${esc(r.detail)}</div></div>
+      <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`;
   }).join('');
-  arrs = c.arrs.map((a) => ({ ...a }));
-  clients = c.clients.map((x) => ({ ...x }));
-  renderArrs();
-  renderClients();
+  $('empty').classList.toggle('hidden', rows.length > 0);
+}
+$('filters').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; paintActivity(); } };
+$('historicbtn').onclick = async () => {
+  const n = state.status.historic;
+  if (!state.config.dryRun && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (up to your daily limit of ${state.config.maxPerDay}). Continue?`)) return;
+  const r = await fetch(api('historic'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  $('historicbtn').dataset.started = '1'; $('historicbtn').textContent = r.ok ? 'Started · see table' : 'Failed to start';
+};
+
+// ---- settings tabs
+const field = (label, type, v, o = {}) => `<label class="f"><span class="lbl">${label}${o.env ? '<span class="env">env</span>' : ''}</span><input type="${type}" ${o.attrs ?? ''} value="${type === 'password' ? '' : esc(v)}" placeholder="${esc(o.ph ?? '')}" ${o.dis ? 'disabled' : ''}>${o.hint ? `<span class="hint">${esc(o.hint)}</span>` : ''}</label>`;
+const switchBtn = (attrs, on, label, hint, dis) => `<button type="button" class="switch" role="switch" aria-checked="${!!on}" ${attrs} ${dis ? 'disabled' : ''}><span class="track"></span><span><b>${label}</b><small>${hint}</small></span></button>`;
+
+function cardDot(list, x) {
+  const t = tests[x._id];
+  if (t && t.st !== 'testing') return t.st === 'ok' ? 'ok' : 'bad';
+  return x.isNew ? 'dim' : dotClass(healthOf(list, x.name));
+}
+function res(x) {
+  const t = tests[x._id];
+  if (!t) return '';
+  return t.st === 'testing' ? '<span class="res wait">Testing…</span>' : `<span class="res ${t.st === 'ok' ? 'ok' : 'bad'}">${t.st === 'ok' ? '✓' : '✕'} ${esc(t.msg)}</span>`;
+}
+function card(list, x) {
+  const env = !!x.fromEnv, d = { dis: env, attrs: `data-list="${list}" data-id="${x._id}"` };
+  const typeDisabled = env || !x.isNew; // a saved card keeps its type; change it by removing and adding again
+  const type = `<label class="f">Type<select data-list="${list}" data-id="${x._id}" data-f="kind" ${typeDisabled ? 'disabled' : ''}>${Object.entries(KINDS[list]).map(([k, l]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  const f = (label, name, t, o = {}) => field(label, t ?? 'text', x[name], { ...d, attrs: `data-list="${list}" data-id="${x._id}" data-f="${name}"`, ...o });
+  const nameField = f('Name', 'name', 'text', { dis: env || !x.isNew, hint: x.isNew ? '' : '' });
+  let fields = '', extra = '';
+  if (list === 'sources') {
+    const plex = x.kind === 'plex';
+    fields = f('URL', 'url') + f(plex ? 'Token' : 'API key', 'key', 'password', { ph: x.keySet ? '(set)' : '', hint: plex ? '' : 'Settings → General' }) + (plex ? '' : f('Issue types to replace', 'issueTypes', 'text', { hint: 'video, audio, subtitles, other' }));
+    if (!plex) extra = switchBtn(`data-list="sources" data-id="${x._id}" data-flip="resolve"`, x.resolve !== false, 'Resolve issues', 'Comment and resolve after replacing', env);
+  } else if (list === 'arrs') {
+    fields = f('URL (include base path)', 'url') + f('API key', 'key', 'password', { ph: x.keySet ? '(set)' : '' });
+  } else if (x.kind === 'qbittorrent') {
+    fields = f('URL', 'url', 'text', { hint: x.default && !x.url ? 'blank: the address each *arr uses' : '' }) + f('Username', 'username') + f('Password', 'password', 'password', { ph: x.passwordSet ? '(set)' : '' });
+  } else {
+    fields = f('URL', 'url', 'text', { hint: x.default && !x.url ? 'blank: the address each *arr uses' : '' }) + f('API key (full, not NZB key)', 'apiKey', 'password', { ph: x.apiKeySet ? '(set)' : '' });
+  }
+  return `<div class="icard" data-card="${x._id}">
+    <div class="ihead"><div class="l"><span class="dot ${cardDot(list, x)}" data-dot="${list}:${esc(x.name)}:${x._id}"></span><b>${esc(x.name)}</b>${env ? '<span class="env">env</span>' : ''}${x.default ? '<span class="env" title="used for any client of this kind that is not matched by address">default</span>' : ''}</div>
+      <div class="r" data-res="${x._id}">${res(x)}<button type="button" class="btn" data-test="${list}" data-id="${x._id}">Test</button>${env ? '' : `<button type="button" class="btn danger" data-remove="${list}" data-id="${x._id}">Remove</button>`}</div></div>
+    <div class="fields">${type}${nameField}${fields}</div>${extra}</div>`;
 }
 
-function renderArrs() {
-  document.getElementById('arrs').innerHTML = arrs.map((a, i) => { const d = a.fromEnv ? 'disabled' : ''; return `<div class="arr">
-    <label>Name${a.fromEnv ? ' <span class="badge">env</span>' : ''}<input data-i="${i}" data-k="name" value="${esc(a.name)}" ${d}></label>
-    <label>Kind<select data-i="${i}" data-k="kind" ${d}>${['sonarr', 'radarr', 'lidarr'].map((k) => `<option ${a.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-    <label>URL (include base path)<input data-i="${i}" data-k="url" value="${esc(a.url)}" ${d}></label>
-    <label>API key<input type="password" data-i="${i}" data-k="key" placeholder="${a.keySet ? '(set)' : ''}" ${d}></label>
-    ${a.fromEnv ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}
-    <div class="rowtest"><button type="button" class="ghost" data-test="arr" data-i="${i}">Test</button> <span class="muted" data-result="arr${i}" role="status"></span></div></div>`; }).join('');
+const SECTIONS = {
+  sources: ['Plex & Overseerr / Seerr', 'Where reports come from. Every instance is polled; a report is matched to whichever *arr owns the file.', 'Add at least one Plex or Overseerr / Seerr instance so Reportarr has reports to act on.'],
+  arrs: ['Sonarr / Radarr / Lidarr', 'Environment instances are read-only. Ones you add are kept alongside them.', 'Add a Sonarr, Radarr or Lidarr instance so Reportarr has somewhere to replace files.'],
+  clients: ['Download clients', 'Moves replacements to the top of the queue. Matched to the client Sonarr/Radarr uses by host:port, or name.', 'No download clients. Replacements are still searched, just not moved to the top of the queue.'],
+};
+function renderPanel() {
+  const p = $('panel');
+  if (tab === 'app') {
+    p.innerHTML = `<div class="section"><div class="sechead"><div class="grow"><h3>Behaviour</h3><span class="desc">How often to check and how much can change per day.</span></div></div>
+      <div class="fields wide">
+        ${field('Poll interval (seconds)', 'number', draft.pollSeconds, { attrs: 'data-top="pollSeconds" min="10"', dis: locked('pollSeconds'), env: locked('pollSeconds') })}
+        ${field('Max replacements per day', 'number', draft.maxPerDay, { attrs: 'data-top="maxPerDay" min="0"', dis: locked('maxPerDay'), env: locked('maxPerDay') })}
+        ${switchBtn('data-flip="dryRun"', draft.dryRun, 'Dry run', 'Log only, never delete', locked('dryRun'))}
+      </div></div>
+      <div class="envrow row"><a href="${api('env')}" id="envlink" download="reportarr.env">Download .env</a><span>Your saved settings as a compose file. Contains API keys, so keep it private; rename to <code>.env</code> and restart.</span></div>`;
+    return;
+  }
+  const [title, desc, none] = SECTIONS[{ sources: 'sources', arr: 'arrs', clients: 'clients' }[tab]] ?? [];
+  const list = { sources: 'sources', arr: 'arrs', clients: 'clients' }[tab];
+  p.innerHTML = `<div class="section" id="${tab === 'arr' ? 'instances' : tab}"><div class="sechead"><div class="grow"><h3>${title}</h3><span class="desc">${desc}</span></div><button type="button" class="btn" data-add="${list}">+ Add</button></div>
+    ${draft[list].map((x) => card(list, x)).join('')}${draft[list].length ? '' : `<div class="empty-dash">${none}</div>`}</div>`;
 }
 
-function renderClients() {
-  document.getElementById('clients').innerHTML = clients.map((x, i) => { const d = x.fromEnv ? 'disabled' : ''; return `<div class="client">
-    <label>Name${x.fromEnv ? ' <span class="badge">env</span>' : ''}<input data-c="${i}" data-k="name" value="${esc(x.name)}" ${d}></label>
-    <label>Kind<select data-c="${i}" data-k="kind" ${d}><option ${x.kind === 'qbittorrent' ? 'selected' : ''}>qbittorrent</option><option ${x.kind === 'sabnzbd' ? 'selected' : ''}>sabnzbd</option></select></label>
-    <label>URL<input data-c="${i}" data-k="url" value="${esc(x.url)}" ${d}></label>
-    <label>Username<input data-c="${i}" data-k="username" value="${esc(x.username)}" ${d}></label>
-    <label>Password<input type="password" data-c="${i}" data-k="password" placeholder="${x.passwordSet ? '(set)' : ''}" ${d}></label>
-    <label>API key<input type="password" data-c="${i}" data-k="apiKey" placeholder="${x.apiKeySet ? '(set)' : ''}" ${d}></label>
-    ${x.fromEnv ? '' : `<button type="button" class="ghost" data-delc="${i}">Remove</button>`}
-    <div class="rowtest"><button type="button" class="ghost" data-test="client" data-c="${i}">Test</button> <span class="muted" data-result="client${i}" role="status"></span></div></div>`; }).join('');
+function showTab() {
+  const settings = tab !== 'activity';
+  $('activity').classList.toggle('hidden', settings);
+  $('settings').classList.toggle('hidden', !settings);
+  $('savebar').classList.toggle('hidden', !settings);
+  paintHeader();
+  if (settings) { $('tabtitle').textContent = Object.fromEntries(TABS)[tab]; renderPanel(); paintSave(); } else paintActivity();
 }
-document.getElementById('clients').addEventListener('input', (e) => { const { c, k } = e.target.dataset; if (c !== undefined) clients[c][k] = e.target.value; });
-document.getElementById('clients').addEventListener('click', (e) => { if (e.target.dataset.delc !== undefined) { clients.splice(+e.target.dataset.delc, 1); renderClients(); } });
-// Test buttons send what is in the form right now (so you can test before saving); blank secrets use the saved ones.
-const val = (name) => { const el = document.querySelector(`#form [name=${name}]`); return el ? el.value : ''; };
-async function runTest(btn) {
-  const t = btn.dataset.test;
-  let req, out;
-  if (t === 'plex') { req = { target: 'plex', plexUrl: val('plexUrl'), plexToken: val('plexToken') }; out = document.getElementById('testresult'); }
-  else if (t === 'overseerr') { req = { target: 'overseerr', overseerrUrl: val('overseerrUrl'), overseerrKey: val('overseerrKey') }; out = document.getElementById('testresult'); }
-  else if (t === 'qbit') { req = { target: 'client', kind: 'qbittorrent', name: '', url: val('qbitUrl'), username: val('qbitUsername'), password: val('qbitPassword') }; out = document.getElementById('testresult'); }
-  else if (t === 'sab') { req = { target: 'client', kind: 'sabnzbd', name: '', url: val('sabUrl'), apiKey: val('sabApiKey') }; out = document.getElementById('testresult'); }
-  else if (t === 'arr') { const { name, kind, url, key } = arrs[btn.dataset.i]; req = { target: 'arr', name, kind, url, key }; out = document.querySelector(`[data-result="arr${btn.dataset.i}"]`); }
-  else { const { name, kind, url, username, password, apiKey } = clients[btn.dataset.c]; req = { target: 'client', name, kind, url, username, password, apiKey }; out = document.querySelector(`[data-result="client${btn.dataset.c}"]`); }
-  document.querySelectorAll('#testresult, [data-result]').forEach((el) => { if (el !== out) el.textContent = ''; });
-  out.className = 'muted'; out.textContent = 'Testing...'; btn.disabled = true;
+function paintSave() {
+  const m = $('savemsg');
+  m.textContent = dirty ? 'Unsaved changes' : saveMsg || 'All changes saved';
+  m.style.color = dirty ? 'var(--acctext)' : saveErr ? 'var(--bad)' : saveMsg ? 'var(--ok)' : 'var(--muted)';
+}
+function paintDots() { // after a refresh, update dots and tab alerts without touching the form
+  document.querySelectorAll('[data-dot]').forEach((el) => { const [list, name, id] = el.dataset.dot.split(':'); const x = find(list, id); if (x) el.className = 'dot ' + cardDot(list, x); });
+  paintHeader();
+}
+
+// ---- editing: inputs write straight into the draft, structural changes re-render
+$('panel').addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.dataset.top) { draft[t.dataset.top] = t.value; markDirty(); return; }
+  if (!t.dataset.f) return;
+  find(t.dataset.list, t.dataset.id)[t.dataset.f] = t.value; markDirty();
+});
+$('panel').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.dataset.f !== 'kind') return;
+  const x = find(t.dataset.list, t.dataset.id); x.kind = t.value;
+  if (x.isNew) { x.name = freeName(t.dataset.list, x.kind, x._id); x.url = URLS[x.kind]; }
+  markDirty(); renderPanel();
+});
+function freeName(list, kind, selfId) {
+  let n = 1; while (draft[list].some((y) => y._id !== selfId && y.name === `${PREFIX[kind]}-${n}`)) n++;
+  return `${PREFIX[kind]}-${n}`;
+}
+$('panel').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.flip) {
+    if (b.dataset.flip === 'dryRun') { draft.dryRun = !draft.dryRun; paintHeader(); }
+    else { const x = find(b.dataset.list, b.dataset.id); x.resolve = x.resolve === false; }
+    markDirty(); renderPanel();
+  } else if (b.dataset.add) {
+    const list = b.dataset.add, kind = Object.keys(KINDS[list])[0];
+    draft[list].push({ _id: ++uid, isNew: true, kind, name: freeName(list, kind), url: URLS[kind], key: '', ...(list === 'clients' ? { username: '', password: '', apiKey: '' } : {}), ...(list === 'sources' ? { issueTypes: 'video,audio,other', resolve: true } : {}) });
+    markDirty(); renderPanel();
+  } else if (b.dataset.remove) {
+    draft[b.dataset.remove] = draft[b.dataset.remove].filter((x) => x._id !== +b.dataset.id); markDirty(); renderPanel();
+  } else if (b.dataset.test) {
+    runTest(b.dataset.test, find(b.dataset.test, b.dataset.id));
+  }
+});
+
+// Test sends the card's current values (so you can test before saving); a blank secret uses the saved one by name.
+async function runTest(list, x) {
+  const req = list === 'sources' ? { target: 'source', kind: x.kind, name: x.name, url: x.url, key: x.key }
+    : list === 'arrs' ? { target: 'arr', kind: x.kind, name: x.name, url: x.url, key: x.key }
+    : { target: 'client', kind: x.kind, name: x.name, url: x.url, username: x.username, password: x.password, apiKey: x.apiKey };
+  for (const k of Object.keys(tests)) if (+k !== x._id && tests[k].st !== 'testing') delete tests[k]; // one result at a time, as before
+  tests[x._id] = { st: 'testing' }; refreshCard(list, x);
   try {
     const r = await (await fetch(api('test'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req) })).json();
-    out.className = r.ok ? 'ok' : 'error'; out.textContent = (r.ok ? 'OK: ' : 'Failed: ') + r.message;
-  } catch (e) { out.className = 'error'; out.textContent = 'Failed: could not reach Reportarr'; }
-  btn.disabled = false;
+    tests[x._id] = { st: r.ok ? 'ok' : 'fail', msg: r.message };
+  } catch { tests[x._id] = { st: 'fail', msg: 'could not reach Reportarr' }; }
+  refreshCard(list, x); refresh();
 }
-document.getElementById('form').addEventListener('click', (e) => { if (e.target.dataset.test) runTest(e.target); });
+function refreshCard(list, x) { // only the result and dot, so unsaved typing is left alone
+  const box = document.querySelector(`[data-res="${x._id}"]`); if (!box) return;
+  const btn = box.querySelector('[data-test]'); btn.disabled = tests[x._id]?.st === 'testing';
+  box.querySelectorAll('.res').forEach((el) => el.remove()); box.insertAdjacentHTML('afterbegin', res(x));
+  const dot = document.querySelector(`[data-card="${x._id}"] .dot`); if (dot) dot.className = 'dot ' + cardDot(list, x);
+}
 
-document.getElementById('historicbtn').onclick = async () => {
-  const n = state.status.historic, live = !state.config.dryRun;
-  if (live && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (up to your daily limit of ${state.config.maxPerDay}). Continue?`)) return;
-  const r = await fetch(api('historic'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  document.getElementById('historicmsg').textContent = r.ok ? 'Started. Progress appears in the table below.' : 'Failed to start.';
+// ---- save
+$('save').onclick = async () => {
+  const strip = ({ _id, isNew, keySet, passwordSet, apiKeySet, fromEnv, ...rest }) => rest;
+  const patch = { sources: draft.sources.filter((x) => !x.fromEnv).map(strip), arrs: draft.arrs.filter((x) => !x.fromEnv).map(strip), clients: draft.clients.filter((x) => !x.fromEnv).map(strip) };
+  for (const k of ['pollSeconds', 'maxPerDay', 'dryRun']) if (!locked(k)) patch[k] = draft[k];
+  $('save').disabled = true;
+  try {
+    const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+    if (!r.ok) throw new Error((await r.json()).error);
+    await load(); dirty = false; saveMsg = 'Saved. Applies on the next poll.'; saveErr = false;
+  } catch (e) { saveMsg = e.message; saveErr = true; dirty = false; }
+  $('save').disabled = false; showTab();
 };
-document.getElementById('addclient').onclick = () => { clients.push({ name: '', kind: 'qbittorrent', url: 'http://', username: '', password: '', apiKey: '' }); renderClients(); };
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
-document.getElementById('arrs').addEventListener('input', (e) => { const { i, k } = e.target.dataset; if (i !== undefined) arrs[i][k] = e.target.value; });
-document.getElementById('arrs').addEventListener('click', (e) => { if (e.target.dataset.del !== undefined) { arrs.splice(+e.target.dataset.del, 1); renderArrs(); } });
-// "Add Sonarr/Radarr/Lidarr": a new row with a free name (radarr-2, radarr-3, ...) and the app's usual address to start from
-const PORTS = { sonarr: 8989, radarr: 7878, lidarr: 8686 };
-document.querySelectorAll('[data-add]').forEach((btn) => { btn.onclick = () => {
-  const kind = btn.dataset.add; let n = arrs.filter((a) => a.kind === kind).length + 1;
-  while (arrs.some((a) => a.name === `${kind}-${n}`)) n++;
-  arrs.push({ name: `${kind}-${n}`, kind, url: `http://${kind}:${PORTS[kind]}`, key: '' }); renderArrs();
-  document.querySelector(`#arrs .arr:last-child [data-k=key]`)?.focus();
-}; });
-
-document.getElementById('form').onsubmit = async (e) => {
-  e.preventDefault();
-  const patch = {};
-  for (const [k, , type] of FIELDS) {
-    const el = e.target.elements[k];
-    if (el.disabled) continue;
-    patch[k] = type === 'checkbox' ? el.checked : type === 'number' ? +el.value : el.value;
-  }
-  // environment-defined rows are read-only; only the ones added here are saved
-  patch.arrs = arrs.filter((a) => !a.fromEnv).map(({ keySet, fromEnv, ...a }) => a);
-  patch.clients = clients.filter((x) => !x.fromEnv).map(({ passwordSet, apiKeySet, fromEnv, ...x }) => x);
-  const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
-  document.getElementById('msg').textContent = r.ok ? 'Saved. Applies on the next poll.' : (await r.json()).error;
-  if (r.ok) load();
-};
-
-async function load() { state = await (await fetch(api('state'))).json(); render(); }
-load();
-setInterval(async () => { // refresh status + changes only, so unsaved edits are not lost
-  const s = await (await fetch(api('state'))).json();
-  state.status = s.status; state.changes = s.changes;
-  renderLog();
-}, 15000);
+// ---- loading and the 15 second refresh (activity and connection dots only: settings edits must survive it)
+async function fetchState() { return (await fetch(api('state'))).json(); }
+async function load() { state = await fetchState(); newDraft(); }
+async function refresh() {
+  try { const s = await fetchState(); Object.assign(state, { status: s.status, changes: s.changes, health: s.health, today: s.today, pollSeconds: s.pollSeconds, authEnabled: s.authEnabled, version: s.version }); } catch { return; }
+  if (tab === 'activity') { paintHeader(); paintActivity(); } else paintDots();
+}
+function route() { const h = location.hash.slice(1); tab = TABS.some(([k]) => k === h) ? h : 'activity'; showTab(); }
+window.addEventListener('hashchange', route);
+(async () => { await load(); route(); setInterval(refresh, 15000); })();
 </script>
 </body>
 </html>
