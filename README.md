@@ -50,6 +50,8 @@ Open `http://<host>:8080` (it has a light/dark/auto theme toggle), watch the **C
 
 Everything can be set with environment variables (the `.env` file), in the web UI, or both. **A value set in the environment wins and shows as read-only in the UI.** UI changes are stored in `/data/config.json` and apply on the next poll.
 
+**Instances and download clients mix.** Sonarr, Radarr and Lidarr instances (and download clients) defined in the environment are shown read-only with an `env` badge, and you can still add more in the UI with the **Add Sonarr / Add Radarr / Add Lidarr** buttons. The two lists are merged: the environment's come first, and the ones you add are saved in `/data/config.json` next to them. Names must be unique; a name already used by an environment instance is refused. Removing a row you added only removes that row.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `PLEX_URL` | `http://plex:32400` | Your Plex server. |
