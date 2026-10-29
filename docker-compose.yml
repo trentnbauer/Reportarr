@@ -14,7 +14,8 @@ services:
       DRY_RUN: ${DRY_RUN:-true}            # set "false" to actually delete and re-download
       POLL_SECONDS: ${POLL_SECONDS:-60}
       MAX_PER_DAY: ${MAX_PER_DAY:-48}
-      UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth, any username
+      UI_USERNAME: ${UI_USERNAME:-}  # optional: if blank, any username is accepted
+      UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth
       ARRS: >-
         [{"name":"sonarr1080","kind":"sonarr","url":"http://sonarr1080:8989/sonarr","key":"${SONARR1080_KEY}"},
          {"name":"sonarr4k","kind":"sonarr","url":"http://sonarr4k:8989/s4k","key":"${SONARR4K_KEY}"},

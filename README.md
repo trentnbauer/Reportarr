@@ -37,6 +37,7 @@ services:
       PLEX_URL: http://plex:32400
       PLEX_TOKEN: ${PLEX_TOKEN}
       DRY_RUN: "true"
+      UI_USERNAME: ${UI_USERNAME}
       UI_PASSWORD: ${UI_PASSWORD}
       ARRS: >-
         [{"name":"sonarr","kind":"sonarr","url":"http://sonarr:8989","key":"${SONARR_KEY}"},
@@ -58,7 +59,8 @@ Everything can be set with environment variables, in the web UI, or both. **A va
 | `POLL_SECONDS` | `60` | How often to check for new reports. |
 | `MAX_PER_DAY` | `20` | Maximum replacements per day. |
 | `UI_PORT` | `8080` | Web UI port. |
-| `UI_PASSWORD` | | HTTP basic auth for the UI (any username). **Set this.** The app holds your Plex token and can delete files. |
+| `UI_USERNAME` | | Username for the UI. If blank, any username is accepted (only the password is checked). Needs `UI_PASSWORD`. |
+| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** The app holds your Plex token and can delete files. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
 | `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
 | `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | Default qBittorrent, for setups with one. Used when no `CLIENTS` entry matches. |
@@ -74,7 +76,7 @@ A report holds a Plex item reference. Reportarr asks Plex for that item's file n
 
 ## Security
 
-- **Set `UI_PASSWORD`.** The UI can change which servers Reportarr talks to, and the app holds your Plex token and the arr API keys. Without a password anyone who can reach the port can use it. Don't expose it to the internet; put it behind a reverse proxy with TLS if you need remote access (basic auth is sent in clear text over plain HTTP).
+- **Set `UI_PASSWORD`, and `UI_USERNAME` too.** The UI can change which servers Reportarr talks to, and the app holds your Plex token and the arr API keys. Without a password anyone who can reach the port can use it. Don't expose it to the internet; put it behind a reverse proxy with TLS if you need remote access (basic auth is sent in clear text over plain HTTP).
 - Secrets are never sent to the browser, and `/data/config.json` is written readable only by its owner.
 - Changes to settings must be sent as JSON from the same origin, which stops other websites from changing your settings through your browser.
 - The container runs as root so that existing `/data` volumes keep working. If you prefer, run it with `user: "1000:1000"` and make `./data` writable by that user.

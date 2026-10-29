@@ -114,7 +114,7 @@ test('web server: auth, CSRF and size limits', async () => {
   process.env.UI_PASSWORD = S.ui; process.env.UI_PORT = '0';
   const srv = serve(); await new Promise((r) => srv.once('listening', r));
   const url = `http://127.0.0.1:${srv.address().port}`;
-  const basic = (p) => ({ authorization: 'Basic ' + Buffer.from('admin:' + p).toString('base64') });
+  const basic = (p, u = 'admin') => ({ authorization: 'Basic ' + Buffer.from(u + ':' + p).toString('base64') });
   const post = (headers, body) => fetch(url + '/api/config', { method: 'POST', headers, body });
   try {
     assert.equal((await fetch(url + '/api/state')).status, 401);
@@ -129,7 +129,18 @@ test('web server: auth, CSRF and size limits', async () => {
     assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json' }, '{"maxPerDay":7}')).status, 200);
     assert.equal(getConfig().maxPerDay, 7);
     assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json' }, 'x'.repeat(1_100_000))).status, 400);
-  } finally { srv.close(); delete process.env.UI_PASSWORD; }
+  } finally { srv.close(); }
+
+  // with UI_USERNAME set, both the username and the password must match
+  process.env.UI_USERNAME = 'reporter-' + S.token.slice(0, 4);
+  const srv2 = serve(); await new Promise((r) => srv2.once('listening', r));
+  const url2 = `http://127.0.0.1:${srv2.address().port}/api/state`;
+  try {
+    assert.equal((await fetch(url2, { headers: basic(S.ui, process.env.UI_USERNAME) })).status, 200);
+    assert.equal((await fetch(url2, { headers: basic(S.ui, 'admin') })).status, 401);
+    assert.equal((await fetch(url2, { headers: basic(S.wrong, process.env.UI_USERNAME) })).status, 401);
+    assert.equal((await fetch(url2)).status, 401);
+  } finally { srv2.close(); delete process.env.UI_PASSWORD; delete process.env.UI_USERNAME; }
 });
 
 test('config file is private and the UI sends JSON', () => {

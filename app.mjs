@@ -166,14 +166,20 @@ const MAX_BODY = 1_000_000;
 export function serve() {
   const html = fs.readFileSync(new URL('./ui.html', import.meta.url));
   const pass = process.env.UI_PASSWORD;
-  if (!pass) log('UI_PASSWORD not set: the web UI is open to anyone who can reach it');
+  if (!pass) log('UI_PASSWORD not set: the web UI is open to anyone who can reach it' + (process.env.UI_USERNAME ? ' (UI_USERNAME is ignored without a password)' : ''));
   const body = (req) => new Promise((res, rej) => {
     let d = '', big = false;
     req.on('data', (x) => { if (big) return; d += x; if (d.length > MAX_BODY) { big = true; d = ''; rej(new Error('request too large')); } });
     req.on('end', () => res(d));
   });
-  const authed = (req) => !pass || crypto.timingSafeEqual(
-    sha(Buffer.from((req.headers.authorization ?? '').slice(6), 'base64').toString().split(':').slice(1).join(':')), sha(pass));
+  const user = process.env.UI_USERNAME; // optional: unset accepts any username
+  const authed = (req) => {
+    if (!pass) return true;
+    const [u, ...p] = Buffer.from((req.headers.authorization ?? '').slice(6), 'base64').toString().split(':');
+    const passOk = crypto.timingSafeEqual(sha(p.join(':')), sha(pass));
+    const userOk = !user || crypto.timingSafeEqual(sha(u), sha(user)); // evaluate both so timing doesn't reveal which was wrong
+    return passOk && userOk;
+  };
   return http.createServer(async (req, res) => {
     const send = (code, type, data) => { res.writeHead(code, { 'Content-Type': type }); res.end(data); };
     res.setHeader('X-Content-Type-Options', 'nosniff');
