@@ -278,11 +278,32 @@ export async function poll() {
   return errors.join('; ');
 }
 
+// BASE_URL is the path the app is served under behind a reverse proxy: "/reportarr", or the full public URL
+// "https://media.example.com/reportarr", which also lets that host save settings (Origin check below).
+export function parseBase(value = process.env.BASE_URL) {
+  if (!value) return { prefix: '', host: '' };
+  let host = '', p = value.trim();
+  if (/^https?:\/\//i.test(p)) { try { const u = new URL(p); host = u.host; p = u.pathname; } catch { log('BASE_URL ignored: not a valid URL'); return { prefix: '', host: '' }; } }
+  p = '/' + p.replace(/^\/+|\/+$/g, '');
+  if (p === '/') return { prefix: '', host };
+  if (!/^\/[\w.~\-/]+$/.test(p)) { log('BASE_URL ignored: the path may only contain letters, digits and . _ ~ - /'); return { prefix: '', host }; }
+  return { prefix: p, host };
+}
+
+// Behind a reverse proxy the Host header is often the internal one, so the browser's Origin is also accepted when it
+// matches X-Forwarded-Host or the host in BASE_URL.
+const sameOrigin = (req, baseHost) => {
+  let host; try { host = new URL(req.headers.origin).host; } catch { return false; }
+  const fwd = (req.headers['x-forwarded-host'] ?? '').split(',')[0].trim();
+  return [req.headers.host, fwd, baseHost].filter(Boolean).includes(host);
+};
+
 const sha = (v) => crypto.createHash('sha256').update(v).digest();
 const MAX_BODY = 1_000_000;
 
 export function serve() {
-  const html = fs.readFileSync(new URL('./ui.html', import.meta.url));
+  const { prefix, host: baseHost } = parseBase();
+  const html = fs.readFileSync(new URL('./ui.html', import.meta.url), 'utf8').replace('"__BASE_URL__"', JSON.stringify(prefix ? prefix + '/' : ''));
   const pass = process.env.UI_PASSWORD;
   // no UI_PASSWORD means no login at all: the page just loads (a username on its own is not enough to turn auth on)
   if (!pass) log('UI_PASSWORD not set: the web UI is open to anyone who can reach it' + (process.env.UI_USERNAME ? ' (UI_USERNAME is ignored without a password)' : ''));
@@ -309,22 +330,27 @@ export function serve() {
       return send(401, 'text/plain', 'auth required');
     }
     try {
-      if (req.url === '/api/state') {
+      const url = new URL(req.url, 'http://x');
+      // /reportarr -> /reportarr/ so the page's relative URLs resolve; a proxy that strips the prefix never sends this
+      if (prefix && url.pathname === prefix) { res.writeHead(308, { Location: prefix + '/' + url.search }); return res.end(); }
+      // Route on the /api/... suffix, so it works under any prefix whether or not the proxy strips it.
+      const route = url.pathname.match(/\/api\/(state|env|config|historic)$/)?.[0].slice(5) ?? '';
+      if (route === 'state') {
         return send(200, 'application/json', JSON.stringify({
           config: publicConfig(), locked: lockedKeys(), status, version: VERSION, uiConfigured: hasFileConfig(), authEnabled: !!pass,
           changes: readJson(dataFile('changes.json'), []).reverse(),
         }));
       }
-      if (req.url === '/api/env') {
+      if (route === 'env') {
         res.setHeader('Content-Disposition', 'attachment; filename="reportarr.env"');
         res.setHeader('Cache-Control', 'no-store');
         return send(200, 'text/plain; charset=utf-8', envFile());
       }
-      if (req.method === 'POST' && (req.url === '/api/config' || req.url === '/api/historic')) {
+      if (req.method === 'POST' && (route === 'config' || route === 'historic')) {
         // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
         if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return send(415, 'application/json', '{"error":"content-type must be application/json"}');
-        if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
-        if (req.url === '/api/historic') { historicRequested = true; wake?.(); return send(202, 'application/json', '{}'); }
+        if (req.headers.origin && !sameOrigin(req, baseHost)) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
+        if (route === 'historic') { historicRequested = true; wake?.(); return send(202, 'application/json', '{}'); }
         saveConfig(JSON.parse(await body(req)));
         return send(200, 'application/json', '{}');
       }

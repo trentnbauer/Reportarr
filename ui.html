@@ -58,7 +58,7 @@ try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light'
   <div id="clients"></div>
   <button type="button" class="ghost" id="addclient">Add download client</button>
   <p><button type="submit">Save</button> <span id="msg" class="muted"></span></p>
-  <p id="envbox" hidden><a class="btn" href="/api/env" download="reportarr.env">Download .env</a>
+  <p id="envbox" hidden><a class="btn" id="envlink" href="api/env" download="reportarr.env">Download .env</a>
     <span class="muted">Your settings as a file for docker compose. It contains your API keys and passwords, so keep it private. Rename it to <code>.env</code> (browsers drop the leading dot), put it next to <code>docker-compose.yml</code> and restart: the settings then come from there and show as read-only here.</span></p>
 </form>
 
@@ -74,6 +74,12 @@ const FIELDS = [
   ['qbitPassword', 'qBittorrent password (default)', 'password'],
   ['sabUrl', 'SABnzbd URL (default)', 'text'], ['sabApiKey', 'SABnzbd API key (default)', 'password'],
 ];
+// Work out where the app is mounted from the URL the page was loaded at, so it runs under any reverse proxy path
+// prefix (https://host/reportarr or https://host/reportarr/) without configuration.
+const BASE = "__BASE_URL__" || (location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'); // BASE_URL when set, else where the page was loaded from
+const api = (name) => BASE + 'api/' + name;
+document.getElementById('envlink').href = api('env');
+
 const THEMES = ['auto', 'dark', 'light'];
 const ICON = { auto: 'Theme: auto', dark: 'Theme: dark', light: 'Theme: light' };
 let theme = 'auto';
@@ -156,7 +162,7 @@ document.getElementById('clients').addEventListener('click', (e) => { if (e.targ
 document.getElementById('historicbtn').onclick = async () => {
   const n = state.status.historic, live = !state.config.dryRun;
   if (live && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (up to your daily limit of ${state.config.maxPerDay}). Continue?`)) return;
-  const r = await fetch('/api/historic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const r = await fetch(api('historic'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   document.getElementById('historicmsg').textContent = r.ok ? 'Started. Progress appears in the table below.' : 'Failed to start.';
 };
 document.getElementById('addclient').onclick = () => { clients.push({ name: '', kind: 'qbittorrent', url: 'http://', username: '', password: '', apiKey: '' }); renderClients(); };
@@ -175,15 +181,15 @@ document.getElementById('form').onsubmit = async (e) => {
   }
   if (!state.locked.includes('arrs')) patch.arrs = arrs.map(({ keySet, ...a }) => a);
   if (!state.locked.includes('clients')) patch.clients = clients.map(({ passwordSet, apiKeySet, ...x }) => x);
-  const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+  const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
   document.getElementById('msg').textContent = r.ok ? 'Saved. Applies on the next poll.' : (await r.json()).error;
   if (r.ok) load();
 };
 
-async function load() { state = await (await fetch('/api/state')).json(); render(); }
+async function load() { state = await (await fetch(api('state'))).json(); render(); }
 load();
 setInterval(async () => { // refresh status + changes only, so unsaved edits are not lost
-  const s = await (await fetch('/api/state')).json();
+  const s = await (await fetch(api('state'))).json();
   state.status = s.status; state.changes = s.changes;
   renderLog();
 }, 15000);
