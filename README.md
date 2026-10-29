@@ -2,14 +2,14 @@
 
 Automagically fix Plex reports.
 
-When a user uses Plex's **Report an issue** (or an Overseerr/Seerr issue) on a title (bad quality, wrong movie, broken file), Reportarr finds the reported file in Sonarr or Radarr, deletes it, blocklists the release it came from, and searches again. Nobody has to hand-manage anything.
+When a user uses Plex's **Report an issue** (or an Overseerr/Seerr issue) on a title (bad quality, wrong movie, broken file), Reportarr finds the reported file in Sonarr, Radarr or Lidarr, deletes it, blocklists the release it came from, and searches again. Nobody has to hand-manage anything.
 
 > **Built by Claude.** This app was written by [Claude](https://claude.com/claude-code) (Anthropic's AI coding assistant) working with the repository owner, and has been tested against a real Plex, Sonarr, Radarr, qBittorrent and SABnzbd setup. Treat it like any young project: start in dry-run mode, read the code, and keep backups of anything you can't re-download.
 
 ## What it does
 
 1. Polls Plex's community API for **Reported Issues** on your server (the same data the Plex web app shows), and optionally your Overseerr/Seerr's open issues. Neither has a webhook for this, so it polls every 60 seconds by default.
-2. For each **new** report, resolves the reported item to its file, then to the Sonarr/Radarr instance that owns that exact file. Multiple instances (for example 1080p and 4K) are supported.
+2. For each **new** report, resolves the reported item to its file, then to the Sonarr/Radarr instance that owns that exact file. Multiple instances (for example 1080p and 4K) are supported, and so is music through Lidarr.
 3. Deletes the file, marks the grabbed release as failed (which blocklists it), and starts a search for a replacement.
 4. Optionally moves the replacement to the top of the qBittorrent or SABnzbd queue.
 5. Shows every action, and your settings, in a small web UI on port 8080. Reports that were already open when Reportarr first started are left alone, but a button in the UI can action them (or dry-run them) when you want.
@@ -54,7 +54,7 @@ Everything can be set with environment variables (the `.env` file), in the web U
 |---|---|---|
 | `PLEX_URL` | `http://plex:32400` | Your Plex server. |
 | `PLEX_KEY` | | Plex server owner's token. Needed to read reports. (`PLEX_TOKEN` also works.) |
-| `SONARR_1_URL`, `SONARR_1_KEY`, `RADARR_1_URL`, `RADARR_1_KEY` | | Your Sonarr and Radarr instances. Number them 1, 2, 3, and so on, as many as you have (`SONARR_2_URL`, `RADARR_3_KEY`, ...). Include any URL base path. `SONARR_1_NAME` optionally sets the display name (default `sonarr-1`). Unnumbered `SONARR_URL`/`SONARR_KEY` and the older `ARRS` JSON list also still work. |
+| `SONARR_1_URL`, `SONARR_1_KEY`, `RADARR_1_URL`, `RADARR_1_KEY`, `LIDARR_1_URL`, `LIDARR_1_KEY` | | Your Sonarr, Radarr and Lidarr (music) instances. Number them 1, 2, 3, and so on, as many as you have (`SONARR_2_URL`, `RADARR_3_KEY`, `LIDARR_2_URL`, ...). Include any URL base path. `SONARR_1_NAME` optionally sets the display name (default `sonarr-1`). Unnumbered `SONARR_URL`/`SONARR_KEY` and the older `ARRS` JSON list also still work. |
 | `OVERSEERR_URL`, `OVERSEERR_KEY` | | Your Overseerr/Seerr and its API key (Settings, General). Leave blank to skip Overseerr. |
 | `OVERSEERR_ISSUE_TYPES` | `video,audio,other` | Which issue types replace the file: `video`, `audio`, `subtitles`, `other`. |
 | `OVERSEERR_RESOLVE` | `true` | Comment on and resolve the Overseerr issue after replacing. |
@@ -116,6 +116,8 @@ Sonarr and Radarr don't expose their download clients' passwords or full API key
 
 **Plex.** A report holds a Plex item reference. Reportarr asks Plex for that item's file name and IDs (TVDB for series, TMDB for movies), looks the item up in each Sonarr/Radarr instance of the right kind, and acts on the instance whose file name matches. If no instance owns the file, or the item is already gone from Plex, the report is logged as skipped.
 
+**Plex music.** A reported track is matched to Lidarr by artist name and file name. Lidarr works per album, so the **whole album** is replaced: all of its files are deleted, the release they came from is blocklisted and the album is searched again. That keeps the album one consistent release. Tracks whose artist or file Lidarr does not have are skipped.
+
 **Overseerr/Seerr.** An issue names a title, not a file, so Reportarr looks the title up by TMDB id (movies) or TVDB/TMDB id (series) in every Radarr or Sonarr and replaces the file in each instance that has one (so a 1080p and a 4K copy both go). Movie issues replace the movie file. TV issues replace the reported episode; if the issue names a season but no episode, every episode with a file in that season; issues against the whole series are skipped, as are issue types not listed in `OVERSEERR_ISSUE_TYPES` (subtitle problems are better fixed by Bazarr). After replacing, Reportarr comments on the issue and resolves it, unless `OVERSEERR_RESOLVE=false`. Open issues that exist when you first add Overseerr are never actioned automatically; use the button in the web UI for those.
 
 ## Security
@@ -131,7 +133,8 @@ Sonarr and Radarr don't expose their download clients' passwords or full API key
 - Only the 100 newest open Overseerr issues are read each poll.
 - Uses an unofficial Plex endpoint (`community.plex.tv`), the same one the Plex web app uses. Plex could change it without notice.
 - A replacement may be the same bad release again if Sonarr/Radarr don't match it to the blocklist entry. Check the Changes table after the first few real runs.
-- Only Sonarr and Radarr are supported (no Lidarr).
+- Supported apps are Sonarr, Radarr and Lidarr. **Readarr is not supported**: the project has been retired, Plex has no ebook library to report on, and Overseerr does not handle books, so there is nothing to drive it. Whisparr is not supported either.
+- Lidarr support was verified against a real Lidarr and a real Plex music library for matching (dry run), but the delete, blocklist and search calls were only exercised against a test server. Run it in dry run first.
 - One bad report from one user deletes a file. That is the design, so mind who can report on your server and keep `MAX_PER_DAY` sensible.
 
 ## Versions

@@ -7,7 +7,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runCheck, PLEX_COMMUNITY_URL } from './checks.mjs';
-import { DATA_DIR, getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
+import { DATA_DIR, ARR_API, getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
 
 export const ratingKeyOf = (url) => url?.match(/\/library\/metadata\/(\d+)$/)?.[1];
 export const idsOf = (guids = []) => Object.fromEntries(guids.map((g) => g.id.split('://')));
@@ -38,7 +38,7 @@ const plex = async (c, p) => {
   return (await r.json()).MediaContainer;
 };
 const arr = async (a, method, p, body) => {
-  const r = await fetch(`${a.url}/api/v3${p}`, {
+  const r = await fetch(`${a.url}/api/${ARR_API[a.kind] ?? 'v3'}${p}`, {
     method,
     headers: { 'X-Api-Key': a.key, 'Content-Type': 'application/json' },
     body: body && JSON.stringify(body),
@@ -83,6 +83,13 @@ async function locate(c, m, files) {
       const ep = eps.find((e) => e.seasonNumber === m.parentIndex && e.episodeNumber === m.index && e.hasFile
         && files.has(path.basename(e.episodeFile.path)));
       if (ep) return { a, ep, fileId: ep.episodeFile.id };
+    }
+  } else if (m.type === 'track') {
+    // Lidarr works per album: find the artist by name, the file by name, then take the whole album so it stays one release
+    for (const a of c.arrs.filter((x) => x.kind === 'lidarr')) {
+      const artist = (await arr(a, 'GET', '/artist')).find((x) => x.artistName.toLowerCase() === m.grandparentTitle?.toLowerCase());
+      const file = artist && (await arr(a, 'GET', `/trackfile?artistId=${artist.id}`)).find((f) => files.has(path.basename(f.path)));
+      if (file) return { a, albumId: file.albumId, fileIds: (await arr(a, 'GET', `/trackfile?albumId=${file.albumId}`)).map((f) => f.id) };
     }
   } else if (m.type === 'movie') {
     const tmdb = idsOf(m.Guid).tmdb;
@@ -136,26 +143,34 @@ export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
   record({ status: 'info', title, instance: a.name, detail: 'replacement not in queue after 2 min; priority not set' });
 }
 
-// Delete one file, blocklist the release it came from, search again and push the new grab to the top of the queue.
-async function swap(c, report, title, { a, ep, movie, fileId }) {
-  if (c.dryRun) return record({ status: 'dry-run', reportId: report.id, title, instance: a.name, detail: `would delete file ${fileId}, blocklist, search` });
-  const hist = await arr(a, 'GET', ep ? `/history?episodeId=${ep.id}&eventType=1&pageSize=1&sortKey=date&sortDirection=descending`
-    : `/history/movie?movieId=${movie.id}&eventType=1`);
+// What to call in each app to find the grabbed release, delete the file(s), search again and spot the new grab in the queue.
+const planFor = ({ ep, movie, albumId }) => {
+  const recent = 'eventType=1&pageSize=1&sortKey=date&sortDirection=descending';
+  if (ep) return { hist: `/history?episodeId=${ep.id}&${recent}`, del: (id) => `/episodefile/${id}`, cmd: { name: 'EpisodeSearch', episodeIds: [ep.id] }, ours: (r) => r.episodeId === ep.id };
+  if (movie) return { hist: `/history/movie?movieId=${movie.id}&eventType=1`, del: (id) => `/moviefile/${id}`, cmd: { name: 'MoviesSearch', movieIds: [movie.id] }, ours: (r) => r.movieId === movie.id };
+  return { hist: `/history?albumId=${albumId}&${recent}`, del: (id) => `/trackfile/${id}`, cmd: { name: 'AlbumSearch', albumIds: [albumId] }, ours: (r) => r.albumId === albumId };
+};
+
+// Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
+async function swap(c, report, title, hit) {
+  const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = planFor(hit);
+  if (c.dryRun) return record({ status: 'dry-run', reportId: report.id, title, instance: a.name, detail: `would delete ${ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`}, blocklist, search` });
+  const hist = await arr(a, 'GET', plan.hist);
   const grabbed = (hist.records ?? hist)[0];
-  await arr(a, 'DELETE', ep ? `/episodefile/${fileId}` : `/moviefile/${fileId}`);
+  for (const id of ids) await arr(a, 'DELETE', plan.del(id));
   if (grabbed) await arr(a, 'POST', `/history/failed/${grabbed.id}`).catch((e) => record({ status: 'error', reportId: report.id, title, instance: a.name, detail: 'blocklist failed: ' + e.message }));
-  await arr(a, 'POST', '/command', ep ? { name: 'EpisodeSearch', episodeIds: [ep.id] } : { name: 'MoviesSearch', movieIds: [movie.id] });
-  record({ status: 'replaced', reportId: report.id, title, instance: a.name, detail: `deleted file ${fileId}, blocklisted: ${!!grabbed}, search started` });
-  prioritize(c, a, (r) => (ep ? r.episodeId === ep.id : r.movieId === movie.id), title)
+  await arr(a, 'POST', '/command', plan.cmd);
+  record({ status: 'replaced', reportId: report.id, title, instance: a.name, detail: `deleted ${ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`}, blocklisted: ${!!grabbed}, search started` });
+  prioritize(c, a, plan.ours, title)
     .catch((e) => record({ status: 'error', reportId: report.id, title, instance: a.name, detail: 'priority failed: ' + e.message }));
 }
 
-async function replace(c, report) {
+export async function replace(c, report) {
   const key = ratingKeyOf(report.url);
   const m = key && (await plex(c, `/library/metadata/${key}`)).Metadata?.[0];
   if (!m) return record({ status: 'skipped', reportId: report.id, detail: 'item no longer in Plex (already deleted or replaced): ' + report.url });
   const title = `${m.grandparentTitle ? m.grandparentTitle + ' ' : ''}${m.title}`;
-  const files = new Set(m.Media.flatMap((x) => x.Part.map((p) => path.basename(p.file))));
+  const files = new Set((m.Media ?? []).flatMap((x) => x.Part.map((p) => path.basename(p.file))));
   const hit = await locate(c, m, files);
   if (!hit) return record({ status: 'skipped', reportId: report.id, title, detail: 'no Sonarr/Radarr instance owns ' + [...files] });
   await swap(c, report, title, hit);

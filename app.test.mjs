@@ -36,7 +36,7 @@ test('secrets are never exposed and blank keeps the stored one', () => {
 });
 
 test('invalid instances are rejected', () => {
-  assert.throws(() => saveConfig({ arrs: [{ name: 'x', kind: 'lidarr', url: 'http://x' }] }), /invalid instance/);
+  assert.throws(() => saveConfig({ arrs: [{ name: 'x', kind: 'bazarr', url: 'http://x' }] }), /invalid instance/);
 });
 
 // --- multiple qBittorrent / SABnzbd instances, against fake servers ---

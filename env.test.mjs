@@ -29,9 +29,11 @@ test('numbered SONARR_N / RADARR_N variables go up as far as you like, in numeri
     SONARR_10_URL: 'http://s10:8989', SONARR_10_KEY: k.b, SONARR_10_NAME: 'sonarr-4k',
     SONARR_2_URL: 'http://s2:8989', SONARR_2_KEY: k.c,
     RADARR_1_URL: 'http://r1:7878', RADARR_1_KEY: k.d, RADARR_3_URL: '', RADARR_3_KEY: 'ignored-without-url',
+    LIDARR_1_URL: 'http://l1:8686/lidarr/', LIDARR_1_KEY: k.a, LIDARR_2_URL: 'http://l2:8686', LIDARR_2_KEY: k.b, LIDARR_2_NAME: 'flac-music',
   });
   assert.deepEqual(c.arrs.map((a) => [a.name, a.kind, a.url]), [
-    ['sonarr-1', 'sonarr', 'http://s1:8989'], ['sonarr-2', 'sonarr', 'http://s2:8989'], ['sonarr-4k', 'sonarr', 'http://s10:8989'], ['radarr-1', 'radarr', 'http://r1:7878']]);
+    ['sonarr-1', 'sonarr', 'http://s1:8989'], ['sonarr-2', 'sonarr', 'http://s2:8989'], ['sonarr-4k', 'sonarr', 'http://s10:8989'], ['radarr-1', 'radarr', 'http://r1:7878'],
+    ['lidarr-1', 'lidarr', 'http://l1:8686/lidarr'], ['flac-music', 'lidarr', 'http://l2:8686']]);
   assert.equal(c.arrs[2].key, k.b);
   assert.ok(locked.includes('arrs'));
 });
@@ -60,7 +62,7 @@ test('the exported .env reproduces the same settings, including awkward characte
     plexUrl: 'http://plex:32400', plexToken: awkward, dryRun: false, maxPerDay: 7, pollSeconds: 90,
     overseerrUrl: 'http://seerr:5055', overseerrKey: rnd(), overseerrTypes: 'video,audio', overseerrResolve: false,
     qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: awkward, sabApiKey: rnd(),
-    arrs: [{ name: 'tv one', kind: 'sonarr', url: 'http://s1:8989/sonarr', key: rnd() }, { name: 'tv two', kind: 'sonarr', url: 'http://s2:8989', key: rnd() }, { name: 'films', kind: 'radarr', url: 'http://r:7878', key: rnd() }],
+    arrs: [{ name: 'tv one', kind: 'sonarr', url: 'http://s1:8989/sonarr', key: rnd() }, { name: 'tv two', kind: 'sonarr', url: 'http://s2:8989', key: rnd() }, { name: 'films', kind: 'radarr', url: 'http://r:7878', key: rnd() }, { name: 'my music', kind: 'lidarr', url: 'http://l:8686/lidarr', key: rnd() }],
     clients: [{ name: 'q1', kind: 'qbittorrent', url: 'http://q1:8080', username: 'u', password: awkward, apiKey: '' }],
   });
   const original = getConfig();
