@@ -43,7 +43,7 @@ services:
          {"name":"radarr","kind":"radarr","url":"http://radarr:7878","key":"${RADARR_KEY}"}]
 ```
 
-See [`docker-compose.yml`](docker-compose.yml) for a fuller example. Open `http://<host>:8080`, watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
+See [`docker-compose.yml`](docker-compose.yml) for a fuller example, and copy [`.env.example`](.env.example) to `.env` to hold your tokens and keys. Open `http://<host>:8080`, watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
 
 ## Configuration
 
