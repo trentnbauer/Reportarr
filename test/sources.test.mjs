@@ -48,8 +48,9 @@ let issues1 = [], issues2 = [];
 const seerr1 = await seerr(T.os1, issues1);
 const seerr2 = await seerr(T.os2, issues2);
 
-const { poll, serve } = await import('./app.mjs');
-const { saveConfig } = await import('./config.mjs');
+const { poll } = await import('../src/engine.mjs');
+const { serve } = await import('../src/server.mjs');
+const { saveConfig } = await import('../src/config.mjs');
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
 const report = (id, machine, key, date) => ({ id, date, url: `server://${machine}/com.plexapp.plugins.library/library/metadata/${key}` });
 

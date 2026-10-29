@@ -32,8 +32,8 @@ fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({
 fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ seen: ['seen-1', 'seen-2'], day: new Date().toISOString().slice(0, 10), count: 4, sources: ['plex', 'overseerr'] }));
 fs.writeFileSync(path.join(data, 'changes.json'), JSON.stringify([{ time: '2026-10-28T00:00:00Z', status: 'replaced', reportId: 'seen-1', title: 'Old Film', detail: 'x' }]));
 
-const { poll } = await import('./app.mjs');
-const { getConfig, publicConfig } = await import('./config.mjs');
+const { poll } = await import('../src/engine.mjs');
+const { getConfig, publicConfig } = await import('../src/config.mjs');
 const changes = () => JSON.parse(fs.readFileSync(path.join(data, 'changes.json'), 'utf8'));
 
 test('old-style settings are read as sources and a default client', () => {
