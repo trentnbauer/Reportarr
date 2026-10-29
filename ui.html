@@ -25,6 +25,7 @@
   input[type=checkbox] { width:auto; margin-right:6px; }
   input:disabled { opacity:.6; }
   button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#111; font:inherit; font-weight:600; cursor:pointer; }
+  a.btn { display:inline-block; padding:8px 14px; border:1px solid var(--line); border-radius:6px; color:var(--fg); font-weight:600; text-decoration:none; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
   .client { display:grid; grid-template-columns:1fr 120px 2fr 1fr 1fr 1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
   .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
@@ -55,6 +56,8 @@ try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light'
   <div id="clients"></div>
   <button type="button" class="ghost" id="addclient">Add download client</button>
   <p><button type="submit">Save</button> <span id="msg" class="muted"></span></p>
+  <p id="envbox" hidden><a class="btn" href="/api/env" download="reportarr.env">Download .env</a>
+    <span class="muted">Your settings as a file for docker compose. It contains your API keys and passwords, so keep it private. Rename it to <code>.env</code> (browsers drop the leading dot), put it next to <code>docker-compose.yml</code> and restart: the settings then come from there and show as read-only here.</span></p>
 </form>
 
 <script>
@@ -62,6 +65,9 @@ const FIELDS = [
   ['plexUrl', 'Plex URL', 'text'], ['plexToken', 'Plex token', 'password'],
   ['pollSeconds', 'Poll interval (seconds)', 'number'], ['maxPerDay', 'Max replacements per day', 'number'],
   ['dryRun', 'Dry run (log only, never delete)', 'checkbox'],
+  ['overseerrUrl', 'Overseerr/Seerr URL', 'text'], ['overseerrKey', 'Overseerr/Seerr API key', 'password'],
+  ['overseerrTypes', 'Overseerr issue types to replace (video, audio, subtitles, other)', 'text'],
+  ['overseerrResolve', 'Comment on and resolve Overseerr issues after replacing', 'checkbox'],
   ['qbitUrl', 'qBittorrent URL (default)', 'text'], ['qbitUsername', 'qBittorrent username (default)', 'text'],
   ['qbitPassword', 'qBittorrent password (default)', 'password'],
   ['sabUrl', 'SABnzbd URL (default)', 'text'], ['sabApiKey', 'SABnzbd API key (default)', 'password'],
@@ -101,6 +107,7 @@ function renderLog() {
 
 function render() {
   renderLog();
+  document.getElementById('envbox').hidden = !state.uiConfigured;
   const { config: c, locked } = state;
   document.getElementById('fields').innerHTML = FIELDS.map(([k, label, type]) => {
     const lock = locked.includes(k), set = c[k + 'Set'];
