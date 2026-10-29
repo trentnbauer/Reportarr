@@ -10,7 +10,7 @@ const rnd = () => randomBytes(8).toString('hex'); // generated per run so the re
 const S = { pwA: rnd(), pwB: rnd(), keyA: rnd(), keyB: rnd(), token: rnd(), key: rnd(), kept: rnd(), wrong: rnd(), ui: rnd() };
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-'));
 process.env.POLL_SECONDS = '30'; // env-locked key
-const { VERSION, ratingKeyOf, idsOf, clientFor, prioritize, serve, pendingHistoric } = await import('./app.mjs');
+const { VERSION, ratingKeyOf, idsOf, clientFor, prioritize, serve, pendingHistoric, parseBase } = await import('./app.mjs');
 const { getConfig, publicConfig, saveConfig, lockedKeys } = await import('./config.mjs');
 
 test('ratingKeyOf / idsOf parse Plex references', () => {
@@ -182,6 +182,60 @@ test('without UI_PASSWORD there is no login: the page just loads', async () => {
   process.env.UI_PASSWORD = S.ui; process.env.UI_PORT = '0';
   const srv = serve(); await new Promise((r) => srv.once('listening', r));
   try { assert.equal((await fetch(`http://127.0.0.1:${srv.address().port}/`)).status, 401); } finally { srv.close(); delete process.env.UI_PASSWORD; }
+});
+
+test('works under any reverse proxy path prefix, and accepts the browser origin a proxy forwards', async () => {
+  process.env.UI_PASSWORD = S.ui; process.env.UI_PORT = '0';
+  const srv = serve(); await new Promise((r) => srv.once('listening', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const auth = { authorization: 'Basic ' + Buffer.from('admin:' + S.ui).toString('base64') };
+  const post = (p, h) => fetch(base + p, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', ...h }, body: '{"maxPerDay":9}' });
+  try {
+    // the prefix may or may not be stripped by the proxy: both reach the same handlers
+    for (const p of ['/api/state', '/reportarr/api/state', '/media/reportarr/api/state']) assert.equal((await fetch(base + p, { headers: auth })).status, 200, p);
+    assert.match((await fetch(base + '/reportarr', { headers: auth })).headers.get('content-type'), /text\/html/);
+    assert.match((await fetch(base + '/reportarr/', { headers: auth })).headers.get('content-type'), /text\/html/);
+    assert.match((await fetch(base + '/reportarr/api/stateX', { headers: auth })).headers.get('content-type'), /text\/html/); // only exact API routes
+    assert.equal((await fetch(base + '/reportarr/api/env')).status, 401); // auth still applies under a prefix
+    assert.equal((await post('/reportarr/api/config', {})).status, 200);
+    // the proxy talks to us as 127.0.0.1 but the browser's Origin is the public host
+    const pub = { origin: 'https://media.example.com' };
+    assert.equal((await post('/reportarr/api/config', pub)).status, 403, 'unknown origin refused');
+    assert.equal((await post('/reportarr/api/config', { ...pub, 'x-forwarded-host': 'media.example.com' })).status, 200);
+    assert.equal((await post('/reportarr/api/config', { ...pub, 'x-forwarded-host': 'evil.example' })).status, 403);
+  } finally { srv.close(); delete process.env.UI_PASSWORD; }
+});
+
+test('BASE_URL: parsing, redirect to the trailing slash, injected into the page, and its host may save', async () => {
+  assert.deepEqual(parseBase('/reportarr'), { prefix: '/reportarr', host: '' });
+  assert.deepEqual(parseBase('reportarr/'), { prefix: '/reportarr', host: '' });
+  assert.deepEqual(parseBase('https://media.example.com/apps/reportarr/'), { prefix: '/apps/reportarr', host: 'media.example.com' });
+  assert.deepEqual(parseBase('https://media.example.com'), { prefix: '', host: 'media.example.com' });
+  assert.deepEqual(parseBase('/'), { prefix: '', host: '' });
+  assert.deepEqual(parseBase(''), { prefix: '', host: '' });
+  assert.deepEqual(parseBase('/a";alert(1)//'), { prefix: '', host: '' }); // never let it into the page's script
+
+  process.env.BASE_URL = 'https://media.example.com/reportarr'; process.env.UI_PORT = '0'; delete process.env.UI_PASSWORD;
+  const srv = serve(); await new Promise((r) => srv.once('listening', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const post = (p, h) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...h }, body: '{"maxPerDay":9}' });
+  try {
+    const r = await fetch(base + '/reportarr?x=1', { redirect: 'manual' });
+    assert.equal(r.status, 308); assert.equal(r.headers.get('location'), '/reportarr/?x=1');
+    assert.match(await (await fetch(base + '/reportarr/')).text(), /const BASE = "\/reportarr\/" \|\|/);
+    assert.equal((await fetch(base + '/reportarr/api/state')).status, 200);
+    assert.equal((await fetch(base + '/api/state')).status, 200); // a proxy that strips the prefix still works
+    assert.equal((await post('/reportarr/api/config', { origin: 'https://media.example.com' })).status, 200);
+    assert.equal((await post('/reportarr/api/config', { origin: 'https://evil.example' })).status, 403);
+  } finally { srv.close(); delete process.env.BASE_URL; }
+  const srv2 = serve(); await new Promise((r) => srv2.once('listening', r)); // unset: placeholder is replaced by an empty string, so the page auto-detects
+  try { assert.match(await (await fetch(`http://127.0.0.1:${srv2.address().port}/`)).text(), /const BASE = "" \|\|/); } finally { srv2.close(); }
+});
+
+test('the page builds its API URLs from where it is served', () => {
+  const html = fs.readFileSync(new URL('./ui.html', import.meta.url), 'utf8');
+  assert.ok(!/['"`]\/api\//.test(html), 'no absolute /api/ paths');
+  assert.match(html, /location\.pathname\.endsWith\('\/'\)/);
 });
 
 test('config file is private and the UI sends JSON', () => {
