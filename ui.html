@@ -95,8 +95,15 @@
   .item .st { flex:0 0 118px; display:flex; }
   .status { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; }
   .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
-  .s-replaced, .s-resolved { background:var(--okbg); color:var(--ok); } .s-replacing { background:var(--accbg); color:var(--acctext); } .s-dry { background:var(--accbg); color:var(--acctext); }
-  .s-skipped, .s-other { background:var(--line2); color:var(--neutral); } .s-failed { background:var(--badbg); color:var(--bad); }
+  .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); } .s-replacing, .s-downloading, .s-downloaded { background:var(--accbg); color:var(--acctext); } .s-dry { background:var(--accbg); color:var(--acctext); }
+  .s-skipped, .s-other, .s-reported { background:var(--line2); color:var(--neutral); } .s-failed { background:var(--badbg); color:var(--bad); }
+  .lc { border:1px solid var(--line); border-radius:10px; background:var(--card); }
+  .lc > summary { list-style:none; cursor:pointer; padding:11px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; }
+  .lc > summary::-webkit-details-marker { display:none; }
+  .lc .who { flex:1 1 240px; min-width:0; display:flex; flex-direction:column; gap:2px; word-break:break-word; }
+  .steps { display:flex; gap:4px; flex-wrap:wrap; } .steps span { font-size:11px; padding:1px 7px; border-radius:99px; background:var(--line2); color:var(--neutral); } .steps span.done { background:var(--okbg); color:var(--ok); }
+  .tl { margin:0; padding:2px 14px 12px 14px; list-style:none; display:flex; flex-direction:column; gap:7px; border-top:1px solid var(--line2); }
+  .tl li { display:flex; flex-wrap:wrap; gap:4px 12px; padding-top:7px; font-size:13px; } .tl .tm { flex:0 0 150px; color:var(--muted); } .tl .st { flex:0 0 118px; display:flex; } .tl .tx { flex:1 1 240px; min-width:0; word-break:break-word; }
   .item .body { flex:1 1 260px; min-width:0; display:flex; flex-direction:column; gap:2px; }
   .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
   .item .t b { font-size:14px; }
@@ -160,9 +167,10 @@
     <section class="grid3" id="strip"></section>
     <div class="errbanner row hidden" id="errbanner"></div>
     <section class="col" style="gap:10px">
-      <div class="changes-head row"><h2>Changes</h2><div class="seg" id="filters"></div></div>
+      <div class="changes-head row"><h2>Changes</h2><div class="seg" id="views"></div><div class="seg" id="filters"></div><input type="search" id="lcq" placeholder="Search report ID, title or file" class="hidden" style="flex:1 1 220px;min-width:0"></div>
       <div class="callout row hidden" id="historic"><span id="historictext"></span><button type="button" class="btn" id="historicbtn"></button></div>
-      <div class="list"><div class="lhead"><span>Status</span><span>Title</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
+      <div id="lifecycle" class="col hidden" style="gap:8px"></div>
+      <div class="list" id="loglist"><div class="lhead"><span>Status</span><span>Title</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
     </section>
   </div>
 
@@ -197,7 +205,7 @@ applyTheme();
 let state = null;       // what the server last said
 let draft = null;       // the settings being edited (not saved until Save)
 let dirty = false, saveMsg = '', saveErr = false;
-let tab = 'activity', filter = 'all', uid = 0;
+let tab = 'activity', filter = 'all', view = 'log', lcQuery = '', lcOpen = new Set(), uid = 0;
 const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
 const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients']];
 const K = () => state.kinds; // what each kind is called, its fields and defaults: sent by the server from its integrations
@@ -220,8 +228,8 @@ const rel = (iso) => {
 };
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
-const statusKind = (r) => ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
-const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
+const statusKind = (r) => ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
+const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
 const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
 const failing = () => [
   ...state.config.sources.map((x) => ['sources', x.name]), ...state.config.arrs.map((x) => ['arrs', x.name]), ...state.config.clients.map((x) => ['clients', x.name]),
@@ -277,16 +285,47 @@ function paintActivity() {
     if (!$('historicbtn').dataset.started) $('historicbtn').textContent = `${state.config.dryRun ? 'Dry-run' : 'Action'} ${n} existing report${n === 1 ? '' : 's'}`;
   }
 
+  $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
+  $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
+  $('lcq').classList.toggle('hidden', view !== 'report'); $('lifecycle').classList.toggle('hidden', view !== 'report');
+  if (view === 'report') { paintLifecycle(); return; }
   const rows = filter === 'all' ? all : all.filter((r) => statusKind(r) === filter);
   $('rows').innerHTML = rows.map((r) => {
     const k = statusKind(r), label = STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1));
     return `<div class="item"><span class="st"><span class="status s-${k}"><i></i>${esc(label)}</span></span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
-      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${esc(r.detail)}</div>${r.retry && r.id && !r.retried ? `<button type="button" class="btn" data-retry="${esc(r.id)}">${r.retry === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : ''}</div>
+      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</div>${r.retry && r.id && !r.retried ? `<button type="button" class="btn" data-retry="${esc(r.id)}">${r.retry === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : ''}</div>
       <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`;
   }).join('');
   $('empty').classList.toggle('hidden', rows.length > 0);
 }
+// One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
+const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
+const lifecycleKind = (has, last) => last === 'error' ? 'failed' : ['resolved', 'available', 'imported', 'downloaded', 'downloading', 'replacing', 'replaced', 'skipped'].find(has) ?? 'reported';
+function lifecycles() {
+  const g = new Map();
+  for (const r of [...state.changes].reverse()) if (r.reportId) { if (!g.has(r.reportId)) g.set(r.reportId, []); g.get(r.reportId).push(r); }
+  return [...g].map(([id, rows]) => {
+    const has = (s) => rows.some((r) => r.status === s), uniq = (k) => [...new Set(rows.map((r) => r[k]).filter(Boolean))];
+    const done = Object.fromEntries(STEPS.map(([k]) => [k, has(k)]));
+    return { id, rows, done, kind: lifecycleKind(has, rows[rows.length - 1].status), source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
+  }).sort((a, b) => b.time.localeCompare(a.time));
+}
+function paintLifecycle() {
+  const q = lcQuery.trim().toLowerCase();
+  const list = lifecycles().filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
+  $('lifecycle').innerHTML = list.map((x) => `<details class="lc" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
+      <span class="status s-${x.kind}"><i></i>${esc(STATUS_LABEL[x.kind] ?? x.kind)}</span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span class="muted">${esc(x.source)} · <code>${esc(x.id)}</code></span></span>
+      <span class="steps">${STEPS.map(([k, l]) => `<span class="${x.done[k] ? 'done' : ''}">${l}</span>`).join('')}</span>
+      <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}</span></summary>
+    <ol class="tl">${x.rows.map((r) => { const k = statusKind(r); return `<li><span class="tm">${esc(new Date(r.time).toLocaleString())}</span><span class="st"><span class="status s-${k}"><i></i>${esc(STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)))}</span></span>
+      <span class="tx">${r.title ? `<b>${esc(r.title)}</b> ` : ''}${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</span></li>`; }).join('')}</ol></details>`).join('')
+    || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
+}
+$('views').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; paintActivity(); } };
+$('lcq').oninput = (e) => { lcQuery = e.target.value; paintLifecycle(); };
+$('lifecycle').addEventListener('toggle', (e) => { const id = e.target.dataset?.id; if (id) e.target.open ? lcOpen.add(id) : lcOpen.delete(id); }, true);
 $('rows').onclick = async (e) => {
   const b = e.target.closest('[data-retry]'); if (!b) return;
   if (!state.config.dryRun && b.textContent === 'Retry' && !confirm('This runs the report again, which can delete and re-download its file. Continue?')) return;

@@ -1,6 +1,6 @@
 // Overseerr / Seerr: a report source. Users report an issue on a title; Reportarr replaces its file(s), comments, and
 // resolves the issue once the new file(s) are imported. Everything specific to it lives here.
-import { trim, get, work, pass, fail, need, envNumbers } from '../util.mjs';
+import { trim, get, work, pass, fail, need, envNumbers, signed } from '../util.mjs';
 
 // Overseerr names issue types by number
 const ISSUE_TYPE = { 1: 'video', 2: 'audio', 3: 'subtitles', 4: 'other' };
@@ -91,7 +91,7 @@ const seerr = {
     if (c.dryRun || src.resolve === false || capped) return; // capped: leave the issue open, not every file was replaced
     // The issue is resolved later, by finish(), once Sonarr/Radarr have the new file(s): Seerr tells the reporter when it is resolved.
     try {
-      await api(src, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${hits.length === 1 ? 'file is' : 'files are'} imported.` });
+      await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed(`Replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${hits.length === 1 ? 'file is' : 'files are'} imported.`) });
     } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment: ${e.message}` }); }
     if (items.length) {
       ctx.watch(report, items);

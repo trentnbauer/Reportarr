@@ -85,6 +85,22 @@ const plex = {
   },
   reportLabel: (r) => `${!r.src || r.src.name === 'plex' ? 'Plex' : r.src.name} report`,
 
+  // Is a replaced item listed in Plex yet? d is { type: 'movie'|'episode', title, tmdb, tvdb, season, episode }.
+  // Plex cannot look an item up by TMDB/TVDB id, so find it by title, confirm the id, and (when known) the new file's name.
+  // shortcut: title must match Plex's exactly, so a differently named title is never "found", the engine then gives up waiting.
+  async available(src, d, file) {
+    const parts = (m) => (m.Media ?? []).flatMap((x) => x.Part.map((p) => path.basename(p.file)));
+    const listed = (m) => parts(m).length > 0 && (!file || parts(m).includes(file));
+    const ours = (m) => (m.Guid ?? []).some((g) => g.id === `tmdb://${d.tmdb}` || g.id === `tvdb://${d.tvdb}`);
+    for (const sec of ((await plexApi(src, '/library/sections')).Directory ?? []).filter((x) => x.type === (d.type === 'movie' ? 'movie' : 'show'))) {
+      for (const m of ((await plexApi(src, `/library/sections/${sec.key}/all?includeGuids=1&title=${encodeURIComponent(d.title)}`)).Metadata ?? []).filter(ours)) {
+        if (d.type === 'movie') { if (listed(m)) return true; continue; }
+        if (((await plexApi(src, `/library/metadata/${m.ratingKey}/allLeaves`)).Metadata ?? []).some((e) => e.parentIndex === d.season && e.index === d.episode && listed(e))) return true;
+      }
+    }
+    return false;
+  },
+
   // Replace the file a report is about: find the item on the Plex server, then the *arr that owns that exact file.
   async replace(ctx, report) {
     const { c, record } = ctx;

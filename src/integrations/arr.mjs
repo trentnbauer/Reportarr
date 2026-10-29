@@ -38,5 +38,8 @@ export async function check(mod, { url, key }) {
   return pass(`${st.appName ?? mod.kind} ${st.version ?? ''}: API key accepted`);
 }
 
+// the name of a file from its full path (Windows or Unix), for logs
+export const fileName = (p) => p?.split(/[\\/]/).pop();
+
 // the fields every *arr card shows
 export const fields = [{ name: 'url', label: 'URL (include base path)' }, { name: 'key', label: 'API key', type: 'password', set: 'keySet' }];
