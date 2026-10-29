@@ -12,7 +12,7 @@ When a user uses Plex's **Report an issue** on a title (bad quality, wrong movie
 2. For each **new** report, resolves the reported item to its file, then to the Sonarr/Radarr instance that owns that exact file. Multiple instances (for example 1080p and 4K) are supported.
 3. Deletes the file, marks the grabbed release as failed (which blocklists it), and starts a search for a replacement.
 4. Optionally moves the replacement to the top of the qBittorrent or SABnzbd queue.
-5. Shows every action, and your settings, in a small web UI on port 8080.
+5. Shows every action, and your settings, in a small web UI on port 8080. Reports that were already open when Reportarr first started are left alone, but a button in the UI can action them (or dry-run them) when you want.
 
 The report text is ignored on purpose: any report on a file means "replace this file".
 
@@ -44,7 +44,7 @@ services:
          {"name":"radarr","kind":"radarr","url":"http://radarr:7878","key":"${RADARR_KEY}"}]
 ```
 
-See [`docker-compose.yml`](docker-compose.yml) for a fuller example. Open `http://<host>:8080`, watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
+See [`docker-compose.yml`](docker-compose.yml) for a fuller example. Open `http://<host>:8080` (it has a light/dark/auto theme toggle), watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
 
 ## Configuration
 
@@ -88,6 +88,10 @@ A report holds a Plex item reference. Reportarr asks Plex for that item's file n
 - A replacement may be the same bad release again if Sonarr/Radarr don't match it to the blocklist entry. Check the Changes table after the first few real runs.
 - Only Sonarr and Radarr are supported (no Lidarr).
 - One bad report from one user deletes a file. That is the design, so mind who can report on your server and keep `MAX_PER_DAY` sensible.
+
+## Versions
+
+Each image build gets a version: `0.1.<run number>` for builds from `main`, or the tag for tagged releases (`v1.4.0` becomes `1.4.0`). It is shown in the web UI header, set as the image's `org.opencontainers.image.version` label, and added as an image tag next to `latest`. Bump the major.minor part with `VERSION_BASE` in `.github/workflows/docker.yml`.
 
 ## Development
 

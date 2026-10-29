@@ -10,7 +10,7 @@ const rnd = () => randomBytes(8).toString('hex'); // generated per run so the re
 const S = { pwA: rnd(), pwB: rnd(), keyA: rnd(), keyB: rnd(), token: rnd(), key: rnd(), kept: rnd(), wrong: rnd(), ui: rnd() };
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-'));
 process.env.POLL_SECONDS = '30'; // env-locked key
-const { ratingKeyOf, idsOf, clientFor, prioritize, serve } = await import('./app.mjs');
+const { VERSION, ratingKeyOf, idsOf, clientFor, prioritize, serve, pendingHistoric } = await import('./app.mjs');
 const { getConfig, publicConfig, saveConfig, lockedKeys } = await import('./config.mjs');
 
 test('ratingKeyOf / idsOf parse Plex references', () => {
@@ -121,6 +121,7 @@ test('web server: auth, CSRF and size limits', async () => {
     assert.equal((await fetch(url + '/api/state', { headers: basic(S.wrong) })).status, 401);
     const ok = await fetch(url + '/api/state', { headers: basic(S.ui) });
     assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).version, VERSION);
     assert.equal(ok.headers.get('x-frame-options'), 'DENY');
     assert.match(ok.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     // a cross-site form/fetch can send text/plain without a preflight: must be refused
@@ -128,6 +129,11 @@ test('web server: auth, CSRF and size limits', async () => {
     assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json', origin: 'https://evil.example' }, '{"maxPerDay":1}')).status, 403);
     assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json' }, '{"maxPerDay":7}')).status, 200);
     assert.equal(getConfig().maxPerDay, 7);
+    const hist = (h) => fetch(url + '/api/historic', { method: 'POST', headers: { ...basic(S.ui), ...h }, body: '{}' });
+    assert.equal((await hist({ 'content-type': 'text/plain' })).status, 415);
+    assert.equal((await hist({ 'content-type': 'application/json', origin: 'https://evil.example' })).status, 403);
+    assert.equal((await fetch(url + '/api/historic', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
+    assert.equal((await hist({ 'content-type': 'application/json' })).status, 202);
     assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json' }, 'x'.repeat(1_100_000))).status, 400);
   } finally { srv.close(); }
 
@@ -141,6 +147,21 @@ test('web server: auth, CSRF and size limits', async () => {
     assert.equal((await fetch(url2, { headers: basic(S.wrong, process.env.UI_USERNAME) })).status, 401);
     assert.equal((await fetch(url2)).status, 401);
   } finally { srv2.close(); delete process.env.UI_PASSWORD; delete process.env.UI_USERNAME; }
+});
+
+test('historic reports are those seen but never acted on', () => {
+  const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'new' }];
+  const changes = [{ reportId: 'b', status: 'replaced' }, { status: 'info' }];
+  assert.deepEqual(pendingHistoric(nodes, ['a', 'b', 'c'], changes).map((n) => n.id), ['a', 'c']);
+  assert.deepEqual(pendingHistoric(nodes, ['a', 'b', 'c'], [{ reportId: 'a' }, { reportId: 'b' }, { reportId: 'c' }]), []);
+});
+
+test('version is shortened for commit hashes and defaults to dev', async () => {
+  assert.equal(VERSION, 'dev'); // APP_VERSION is not set when running the tests
+  const run = (v) => new Promise((res) => import('node:child_process').then(({ execFile }) =>
+    execFile(process.execPath, ['-e', "import('./app.mjs').then((m) => console.log(m.VERSION))"], { env: { ...process.env, APP_VERSION: v }, cwd: path.dirname(new URL(import.meta.url).pathname) }, (e, out) => res(out.trim()))));
+  assert.equal(await run('0123456789abcdef0123456789abcdef01234567'), '0123456');
+  assert.equal(await run('v1.2.3'), 'v1.2.3');
 });
 
 test('config file is private and the UI sends JSON', () => {

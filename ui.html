@@ -5,10 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reportarr</title>
 <style>
-  :root { --bg:#fff; --fg:#1b1e23; --muted:#6b7280; --card:#f4f5f7; --line:#d9dce1; --accent:#b8780a; --bad:#b42318; --ok:#157f3b; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --accent:#e5a00d; --bad:#f97066; --ok:#4ade80; } }
+  :root { --bg:#fff; --fg:#1b1e23; --muted:#6b7280; --card:#f4f5f7; --line:#d9dce1; --accent:#b8780a; --bad:#b42318; --ok:#157f3b; color-scheme: light; }
+  :root[data-theme="dark"] { --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --accent:#e5a00d; --bad:#f97066; --ok:#4ade80; color-scheme: dark; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --accent:#e5a00d; --bad:#f97066; --ok:#4ade80; color-scheme: dark; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; max-width:1000px; margin-inline:auto; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
   h1 { font-size:20px; } h2 { font-size:16px; margin:28px 0 10px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
   .muted { color:var(--muted); font-size:13px; }
@@ -28,12 +30,17 @@
   .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
   @media (max-width:700px) { .arr, .client { grid-template-columns:1fr 1fr; } }
 </style>
+<script>
+// apply the saved theme before first paint to avoid a flash; 'auto' follows the OS
+try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch {}
+</script>
 </head>
 <body>
-<h1>Reportarr</h1>
+<div class="top"><h1>Reportarr <span class="badge" id="version"></span></h1><button type="button" class="ghost" id="theme" title="Switch between automatic, dark and light"></button></div>
 <div id="status" class="card"></div>
 
 <h2>Changes</h2>
+<p id="historic" hidden><button type="button" id="historicbtn"></button> <span id="historicmsg" class="muted"></span></p>
 <div class="card table"><table id="changes"></table></div>
 
 <h2>Settings</h2>
@@ -59,10 +66,26 @@ const FIELDS = [
   ['qbitPassword', 'qBittorrent password (default)', 'password'],
   ['sabUrl', 'SABnzbd URL (default)', 'text'], ['sabApiKey', 'SABnzbd API key (default)', 'password'],
 ];
+const THEMES = ['auto', 'dark', 'light'];
+const ICON = { auto: 'Theme: auto', dark: 'Theme: dark', light: 'Theme: light' };
+let theme = 'auto';
+try { theme = localStorage.getItem('theme') || 'auto'; } catch {}
+function applyTheme() {
+  if (theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
+  document.getElementById('theme').textContent = ICON[theme];
+}
+document.getElementById('theme').onclick = () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  try { localStorage.setItem('theme', theme); } catch {}
+  applyTheme();
+};
+applyTheme();
+
 let state, arrs = [], clients = [];
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function renderLog() {
+  document.getElementById('version').textContent = state.version;
   const { config: c, status, changes } = state;
   document.getElementById('status').innerHTML =
     `<span class="badge">${c.dryRun ? 'DRY RUN' : 'LIVE'}</span> last poll: ${esc(status.lastPoll ?? 'never')}` +
@@ -71,6 +94,9 @@ function renderLog() {
     ? '<tr><th>Time</th><th>Status</th><th>Title</th><th>Instance</th><th>Detail</th></tr>' +
       changes.map((r) => `<tr><td>${esc(new Date(r.time).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.title)}</td><td>${esc(r.instance)}</td><td>${esc(r.detail)}</td></tr>`).join('')
     : '<tr><td class="muted">Nothing yet. Only new Plex reports are acted on.</td></tr>';
+  const n = status.historic || 0;
+  document.getElementById('historic').hidden = !n;
+  document.getElementById('historicbtn').textContent = `${c.dryRun ? 'Dry-run' : 'Action'} ${n} existing report${n === 1 ? '' : 's'}`;
 }
 
 function render() {
@@ -117,6 +143,12 @@ function renderClients() {
 }
 document.getElementById('clients').addEventListener('input', (e) => { const { c, k } = e.target.dataset; if (c !== undefined) clients[c][k] = e.target.value; });
 document.getElementById('clients').addEventListener('click', (e) => { if (e.target.dataset.delc !== undefined) { clients.splice(+e.target.dataset.delc, 1); renderClients(); } });
+document.getElementById('historicbtn').onclick = async () => {
+  const n = state.status.historic, live = !state.config.dryRun;
+  if (live && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (up to your daily limit of ${state.config.maxPerDay}). Continue?`)) return;
+  const r = await fetch('/api/historic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  document.getElementById('historicmsg').textContent = r.ok ? 'Started. Progress appears in the table below.' : 'Failed to start.';
+};
 document.getElementById('addclient').onclick = () => { clients.push({ name: '', kind: 'qbittorrent', url: 'http://', username: '', password: '', apiKey: '' }); renderClients(); };
 
 document.getElementById('arrs').addEventListener('input', (e) => { const { i, k } = e.target.dataset; if (i !== undefined) arrs[i][k] = e.target.value; });

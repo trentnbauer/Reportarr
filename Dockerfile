@@ -1,4 +1,6 @@
 FROM node:22-alpine
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 WORKDIR /app
 COPY app.mjs config.mjs ui.html ./
 VOLUME /data
