@@ -60,16 +60,24 @@ Everything can be set with environment variables, in the web UI, or both. **A va
 | `UI_PORT` | `8080` | Web UI port. |
 | `UI_PASSWORD` | | HTTP basic auth for the UI (any username). **Set this.** The app holds your Plex token and can delete files. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
-| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | qBittorrent details, used to move the replacement to the top of the queue. |
-| `SAB_URL`, `SAB_API_KEY` | | SABnzbd details, used for the same. |
+| `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
+| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | Default qBittorrent, for setups with one. Used when no `CLIENTS` entry matches. |
+| `SAB_URL`, `SAB_API_KEY` | | Default SABnzbd, for setups with one. |
 
 ### Why the qBittorrent and SABnzbd settings exist
 
-Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
+Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). With several qBittorrent or SABnzbd instances, list each in `CLIENTS` (or the **Download clients** table in the UI). Each queued replacement is matched to its client by the host and port Sonarr/Radarr use for it, falling back to the client's name, so the right instance is always the one that gets the call. For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
 
 ## How it matches a report to a file
 
 A report holds a Plex item reference. Reportarr asks Plex for that item's file name and IDs (TVDB for series, TMDB for movies), looks the item up in each Sonarr/Radarr instance of the right kind, and acts on the instance whose file name matches. If no instance owns the file, or the item is already gone from Plex, the report is logged as skipped.
+
+## Security
+
+- **Set `UI_PASSWORD`.** The UI can change which servers Reportarr talks to, and the app holds your Plex token and the arr API keys. Without a password anyone who can reach the port can use it. Don't expose it to the internet; put it behind a reverse proxy with TLS if you need remote access (basic auth is sent in clear text over plain HTTP).
+- Secrets are never sent to the browser, and `/data/config.json` is written readable only by its owner.
+- Changes to settings must be sent as JSON from the same origin, which stops other websites from changing your settings through your browser.
+- The container runs as root so that existing `/data` volumes keep working. If you prefer, run it with `user: "1000:1000"` and make `./data` writable by that user.
 
 ## Limitations
 

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR, getConfig, publicConfig, lockedKeys, saveConfig } from './config.mjs';
 
@@ -74,32 +75,45 @@ async function locate(c, m, files) {
   }
 }
 
+const CLIENT_KIND = { QBittorrent: 'qbittorrent', Sabnzbd: 'sabnzbd' };
+const real = (v) => (v && !/^\*+$/.test(v) ? v : ''); // Sonarr/Radarr mask stored secrets as ********
+const sameHost = (url, f) => { try { const u = new URL(url); return u.hostname === f.host && +(u.port || (u.protocol === 'https:' ? 443 : 80)) === +f.port; } catch { return false; } };
+
+// Pick the configured download client for one of the arr's clients: an entry in `clients` that has the
+// same host:port (or name), else the default qBittorrent/SABnzbd settings, else the arr's own host.
+export function clientFor(c, implementation, f, armName) {
+  const kind = CLIENT_KIND[implementation];
+  if (!kind) return;
+  const own = `http${f.useSsl ? 's' : ''}://${f.host}:${f.port}${f.urlBase ? '/' + f.urlBase.replace(/^\//, '') : ''}`;
+  const listed = c.clients.find((x) => x.kind === kind && (sameHost(x.url, f) || x.name === armName));
+  const dflt = kind === 'qbittorrent' ? { url: c.qbitUrl, username: c.qbitUsername, password: c.qbitPassword } : { url: c.sabUrl, apiKey: c.sabApiKey };
+  const x = listed ?? dflt;
+  return { kind, name: listed?.name ?? 'default', url: (x.url || own).replace(/\/$/, ''), username: x.username || f.username, password: x.password || real(f.password), apiKey: x.apiKey || real(f.apiKey) };
+}
+
 // Arr apps have no per-item queue priority, so push the new grab to the top in its download client.
-async function prioritize(c, a, isOurs, title) {
+export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
   for (let i = 0; i < 12; i++) { // the search grabs asynchronously; wait up to ~2 min
-    await sleep(10_000);
+    await sleep(waitMs);
     const q = (await arr(a, 'GET', '/queue?pageSize=200')).records.find(isOurs);
     if (!q) continue;
     const cl = (await arr(a, 'GET', '/downloadclient')).find((x) => x.name === q.downloadClient);
     const f = Object.fromEntries(cl.fields.map((x) => [x.name, x.value]));
-    const own = `http${f.useSsl ? 's' : ''}://${f.host}:${f.port}${f.urlBase ? '/' + f.urlBase.replace(/^\//, '') : ''}`;
-    const real = (v) => (v && !/^\*+$/.test(v) ? v : ''); // Sonarr/Radarr mask stored secrets as ********
-    if (cl.implementation === 'QBittorrent') {
-      const base = c.qbitUrl || own;
-      const password = c.qbitPassword || real(f.password);
-      if (!password) throw new Error('qBittorrent password is hidden by the arr: set QBIT_PASSWORD (or in the UI)');
-      const body = new URLSearchParams({ username: c.qbitUsername || f.username, password });
-      const cookie = (await fetch(`${base}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
-      if (!cookie) throw new Error('qBittorrent login failed');
-      const r = await fetch(`${base}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
+    const dc = clientFor(c, cl.implementation, f, q.downloadClient);
+    if (!dc) return record({ status: 'info', title, instance: a.name, detail: `queue priority not supported for ${cl.implementation}` });
+    if (dc.kind === 'qbittorrent') {
+      if (!dc.password) throw new Error(`qBittorrent password for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set QBIT_PASSWORD`);
+      const body = new URLSearchParams({ username: dc.username, password: dc.password });
+      const cookie = (await fetch(`${dc.url}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
+      if (!cookie) throw new Error(`qBittorrent login failed at ${dc.url}`);
+      const r = await fetch(`${dc.url}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
       if (!r.ok) throw new Error(`qBittorrent topPrio ${r.status}`); // 409 = torrent queueing disabled
-    } else if (cl.implementation === 'Sabnzbd') {
-      const apiKey = c.sabApiKey || real(f.apiKey);
-      if (!apiKey) throw new Error('SABnzbd API key is hidden by the arr: set SAB_API_KEY (or in the UI)');
-      const r = await fetch(`${c.sabUrl || own}/api?mode=switch&value=${q.downloadId}&value2=0&output=json&apikey=${encodeURIComponent(apiKey)}`);
+    } else {
+      if (!dc.apiKey) throw new Error(`SABnzbd API key for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set SAB_API_KEY`);
+      const r = await fetch(`${dc.url}/api?mode=switch&value=${q.downloadId}&value2=0&output=json&apikey=${encodeURIComponent(dc.apiKey)}`);
       if (!r.ok) throw new Error(`sabnzbd switch ${r.status}`);
-    } else return record({ status: 'info', title, instance: a.name, detail: `queue priority not supported for ${cl.implementation}` });
-    return record({ status: 'prioritized', title, instance: a.name, detail: `moved "${q.title}" to top of ${q.downloadClient}` });
+    }
+    return record({ status: 'prioritized', title, instance: a.name, detail: `moved "${q.title}" to top of ${q.downloadClient} (${dc.url})` });
   }
   record({ status: 'info', title, instance: a.name, detail: 'replacement not in queue after 2 min; priority not set' });
 }
@@ -146,14 +160,26 @@ async function poll() {
   }
 }
 
-function serve() {
+const sha = (v) => crypto.createHash('sha256').update(v).digest();
+const MAX_BODY = 1_000_000;
+
+export function serve() {
   const html = fs.readFileSync(new URL('./ui.html', import.meta.url));
   const pass = process.env.UI_PASSWORD;
   if (!pass) log('UI_PASSWORD not set: the web UI is open to anyone who can reach it');
-  const body = (req) => new Promise((res) => { let d = ''; req.on('data', (x) => (d += x)); req.on('end', () => res(d)); });
-  http.createServer(async (req, res) => {
+  const body = (req) => new Promise((res, rej) => {
+    let d = '', big = false;
+    req.on('data', (x) => { if (big) return; d += x; if (d.length > MAX_BODY) { big = true; d = ''; rej(new Error('request too large')); } });
+    req.on('end', () => res(d));
+  });
+  const authed = (req) => !pass || crypto.timingSafeEqual(
+    sha(Buffer.from((req.headers.authorization ?? '').slice(6), 'base64').toString().split(':').slice(1).join(':')), sha(pass));
+  return http.createServer(async (req, res) => {
     const send = (code, type, data) => { res.writeHead(code, { 'Content-Type': type }); res.end(data); };
-    if (pass && Buffer.from((req.headers.authorization ?? '').slice(6), 'base64').toString().split(':').slice(1).join(':') !== pass) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+    if (!authed(req)) {
       res.setHeader('WWW-Authenticate', 'Basic realm="Reportarr"');
       return send(401, 'text/plain', 'auth required');
     }
@@ -164,10 +190,16 @@ function serve() {
           changes: readJson(dataFile('changes.json'), []).reverse(),
         }));
       }
-      if (req.url === '/api/config' && req.method === 'POST') { saveConfig(JSON.parse(await body(req))); return send(200, 'application/json', '{}'); }
+      if (req.url === '/api/config' && req.method === 'POST') {
+        // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
+        if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return send(415, 'application/json', '{"error":"content-type must be application/json"}');
+        if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
+        saveConfig(JSON.parse(await body(req)));
+        return send(200, 'application/json', '{}');
+      }
       send(200, 'text/html', html);
     } catch (err) { send(400, 'application/json', JSON.stringify({ error: err.message })); }
-  }).listen(+(process.env.UI_PORT ?? 8080), () => log('web UI on :' + (process.env.UI_PORT ?? 8080)));
+  }).listen(+(process.env.UI_PORT ?? 8080), function () { log('web UI on :' + this.address().port); });
 }
 
 async function main() {
