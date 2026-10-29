@@ -24,6 +24,12 @@ services:
       # hide their download clients' passwords and API keys, so Reportarr can't borrow them.
       # Leave blank to skip queue priority (the replacement still downloads). URL and username fall back
       # to the host/username from each Sonarr/Radarr download client. Use SABnzbd's full API key, not the NZB key.
+      # Several qBittorrent/SABnzbd instances: list them here. Each is matched to the one Sonarr/Radarr uses by
+      # host:port (or name). The single-client variables below are the fallback for anything not listed.
+      # CLIENTS: >-
+      #   [{"name":"qb1","kind":"qbittorrent","url":"http://qbit1:8080","username":"admin","password":"${QBIT1_PASSWORD}"},
+      #    {"name":"qb2","kind":"qbittorrent","url":"http://qbit2:8080","username":"admin","password":"${QBIT2_PASSWORD}"},
+      #    {"name":"sab1","kind":"sabnzbd","url":"http://sab1:8080","apiKey":"${SAB1_API_KEY}"}]
       QBIT_URL: ${QBIT_URL:-}
       QBIT_USERNAME: ${QBIT_USERNAME:-}
       QBIT_PASSWORD: ${QBIT_PASSWORD:-}

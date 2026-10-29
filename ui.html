@@ -24,8 +24,9 @@
   input:disabled { opacity:.6; }
   button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#111; font:inherit; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .client { display:grid; grid-template-columns:1fr 120px 2fr 1fr 1fr 1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
   .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
-  @media (max-width:700px) { .arr { grid-template-columns:1fr 1fr; } }
+  @media (max-width:700px) { .arr, .client { grid-template-columns:1fr 1fr; } }
 </style>
 </head>
 <body>
@@ -42,6 +43,10 @@
   <h3>Sonarr / Radarr instances <span id="arrlock"></span></h3>
   <div id="arrs"></div>
   <button type="button" class="ghost" id="addarr">Add instance</button>
+  <h3>Download clients <span id="clientlock"></span></h3>
+  <p class="muted">For moving the replacement to the top of the queue. Each is matched to the one Sonarr/Radarr uses by host:port (or name). The "default" fields above apply when none match.</p>
+  <div id="clients"></div>
+  <button type="button" class="ghost" id="addclient">Add download client</button>
   <p><button type="submit">Save</button> <span id="msg" class="muted"></span></p>
 </form>
 
@@ -50,11 +55,11 @@ const FIELDS = [
   ['plexUrl', 'Plex URL', 'text'], ['plexToken', 'Plex token', 'password'],
   ['pollSeconds', 'Poll interval (seconds)', 'number'], ['maxPerDay', 'Max replacements per day', 'number'],
   ['dryRun', 'Dry run (log only, never delete)', 'checkbox'],
-  ['qbitUrl', 'qBittorrent URL (override)', 'text'], ['qbitUsername', 'qBittorrent username (override)', 'text'],
-  ['qbitPassword', 'qBittorrent password (override)', 'password'],
-  ['sabUrl', 'SABnzbd URL (override)', 'text'], ['sabApiKey', 'SABnzbd API key (override)', 'password'],
+  ['qbitUrl', 'qBittorrent URL (default)', 'text'], ['qbitUsername', 'qBittorrent username (default)', 'text'],
+  ['qbitPassword', 'qBittorrent password (default)', 'password'],
+  ['sabUrl', 'SABnzbd URL (default)', 'text'], ['sabApiKey', 'SABnzbd API key (default)', 'password'],
 ];
-let state, arrs = [];
+let state, arrs = [], clients = [];
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function renderLog() {
@@ -79,7 +84,9 @@ function render() {
       : `${label}${lock ? ' <span class="badge">env</span>' : ''}<input type="${type}" name="${k}" ${attrs}${ph} ${lock ? 'disabled' : ''}>`}</label>`;
   }).join('');
   arrs = c.arrs.map((a) => ({ ...a }));
+  clients = c.clients.map((x) => ({ ...x }));
   renderArrs();
+  renderClients();
 }
 
 function renderArrs() {
@@ -94,6 +101,24 @@ function renderArrs() {
     ${lock ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}</div>`).join('');
 }
 
+function renderClients() {
+  const lock = state.locked.includes('clients');
+  document.getElementById('clientlock').innerHTML = lock ? '<span class="badge">env</span>' : '';
+  document.getElementById('addclient').hidden = lock;
+  const d = lock ? 'disabled' : '';
+  document.getElementById('clients').innerHTML = clients.map((x, i) => `<div class="client">
+    <label>Name<input data-c="${i}" data-k="name" value="${esc(x.name)}" ${d}></label>
+    <label>Kind<select data-c="${i}" data-k="kind" ${d}><option ${x.kind === 'qbittorrent' ? 'selected' : ''}>qbittorrent</option><option ${x.kind === 'sabnzbd' ? 'selected' : ''}>sabnzbd</option></select></label>
+    <label>URL<input data-c="${i}" data-k="url" value="${esc(x.url)}" ${d}></label>
+    <label>Username<input data-c="${i}" data-k="username" value="${esc(x.username)}" ${d}></label>
+    <label>Password<input type="password" data-c="${i}" data-k="password" placeholder="${x.passwordSet ? '(set)' : ''}" ${d}></label>
+    <label>API key<input type="password" data-c="${i}" data-k="apiKey" placeholder="${x.apiKeySet ? '(set)' : ''}" ${d}></label>
+    ${lock ? '' : `<button type="button" class="ghost" data-delc="${i}">Remove</button>`}</div>`).join('');
+}
+document.getElementById('clients').addEventListener('input', (e) => { const { c, k } = e.target.dataset; if (c !== undefined) clients[c][k] = e.target.value; });
+document.getElementById('clients').addEventListener('click', (e) => { if (e.target.dataset.delc !== undefined) { clients.splice(+e.target.dataset.delc, 1); renderClients(); } });
+document.getElementById('addclient').onclick = () => { clients.push({ name: '', kind: 'qbittorrent', url: 'http://', username: '', password: '', apiKey: '' }); renderClients(); };
+
 document.getElementById('arrs').addEventListener('input', (e) => { const { i, k } = e.target.dataset; if (i !== undefined) arrs[i][k] = e.target.value; });
 document.getElementById('arrs').addEventListener('click', (e) => { if (e.target.dataset.del !== undefined) { arrs.splice(+e.target.dataset.del, 1); renderArrs(); } });
 document.getElementById('addarr').onclick = () => { arrs.push({ name: '', kind: 'sonarr', url: 'http://', key: '' }); renderArrs(); };
@@ -107,6 +132,7 @@ document.getElementById('form').onsubmit = async (e) => {
     patch[k] = type === 'checkbox' ? el.checked : type === 'number' ? +el.value : el.value;
   }
   if (!state.locked.includes('arrs')) patch.arrs = arrs.map(({ keySet, ...a }) => a);
+  if (!state.locked.includes('clients')) patch.clients = clients.map(({ passwordSet, apiKeySet, ...x }) => x);
   const r = await fetch('/api/config', { method: 'POST', body: JSON.stringify(patch) });
   document.getElementById('msg').textContent = r.ok ? 'Saved. Applies on the next poll.' : (await r.json()).error;
   if (r.ok) load();

@@ -74,32 +74,45 @@ async function locate(c, m, files) {
   }
 }
 
+const CLIENT_KIND = { QBittorrent: 'qbittorrent', Sabnzbd: 'sabnzbd' };
+const real = (v) => (v && !/^\*+$/.test(v) ? v : ''); // Sonarr/Radarr mask stored secrets as ********
+const sameHost = (url, f) => { try { const u = new URL(url); return u.hostname === f.host && +(u.port || (u.protocol === 'https:' ? 443 : 80)) === +f.port; } catch { return false; } };
+
+// Pick the configured download client for one of the arr's clients: an entry in `clients` that has the
+// same host:port (or name), else the default qBittorrent/SABnzbd settings, else the arr's own host.
+export function clientFor(c, implementation, f, armName) {
+  const kind = CLIENT_KIND[implementation];
+  if (!kind) return;
+  const own = `http${f.useSsl ? 's' : ''}://${f.host}:${f.port}${f.urlBase ? '/' + f.urlBase.replace(/^\//, '') : ''}`;
+  const listed = c.clients.find((x) => x.kind === kind && (sameHost(x.url, f) || x.name === armName));
+  const dflt = kind === 'qbittorrent' ? { url: c.qbitUrl, username: c.qbitUsername, password: c.qbitPassword } : { url: c.sabUrl, apiKey: c.sabApiKey };
+  const x = listed ?? dflt;
+  return { kind, name: listed?.name ?? 'default', url: (x.url || own).replace(/\/$/, ''), username: x.username || f.username, password: x.password || real(f.password), apiKey: x.apiKey || real(f.apiKey) };
+}
+
 // Arr apps have no per-item queue priority, so push the new grab to the top in its download client.
-async function prioritize(c, a, isOurs, title) {
+export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
   for (let i = 0; i < 12; i++) { // the search grabs asynchronously; wait up to ~2 min
-    await sleep(10_000);
+    await sleep(waitMs);
     const q = (await arr(a, 'GET', '/queue?pageSize=200')).records.find(isOurs);
     if (!q) continue;
     const cl = (await arr(a, 'GET', '/downloadclient')).find((x) => x.name === q.downloadClient);
     const f = Object.fromEntries(cl.fields.map((x) => [x.name, x.value]));
-    const own = `http${f.useSsl ? 's' : ''}://${f.host}:${f.port}${f.urlBase ? '/' + f.urlBase.replace(/^\//, '') : ''}`;
-    const real = (v) => (v && !/^\*+$/.test(v) ? v : ''); // Sonarr/Radarr mask stored secrets as ********
-    if (cl.implementation === 'QBittorrent') {
-      const base = c.qbitUrl || own;
-      const password = c.qbitPassword || real(f.password);
-      if (!password) throw new Error('qBittorrent password is hidden by the arr: set QBIT_PASSWORD (or in the UI)');
-      const body = new URLSearchParams({ username: c.qbitUsername || f.username, password });
-      const cookie = (await fetch(`${base}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
-      if (!cookie) throw new Error('qBittorrent login failed');
-      const r = await fetch(`${base}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
+    const dc = clientFor(c, cl.implementation, f, q.downloadClient);
+    if (!dc) return record({ status: 'info', title, instance: a.name, detail: `queue priority not supported for ${cl.implementation}` });
+    if (dc.kind === 'qbittorrent') {
+      if (!dc.password) throw new Error(`qBittorrent password for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set QBIT_PASSWORD`);
+      const body = new URLSearchParams({ username: dc.username, password: dc.password });
+      const cookie = (await fetch(`${dc.url}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
+      if (!cookie) throw new Error(`qBittorrent login failed at ${dc.url}`);
+      const r = await fetch(`${dc.url}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
       if (!r.ok) throw new Error(`qBittorrent topPrio ${r.status}`); // 409 = torrent queueing disabled
-    } else if (cl.implementation === 'Sabnzbd') {
-      const apiKey = c.sabApiKey || real(f.apiKey);
-      if (!apiKey) throw new Error('SABnzbd API key is hidden by the arr: set SAB_API_KEY (or in the UI)');
-      const r = await fetch(`${c.sabUrl || own}/api?mode=switch&value=${q.downloadId}&value2=0&output=json&apikey=${encodeURIComponent(apiKey)}`);
+    } else {
+      if (!dc.apiKey) throw new Error(`SABnzbd API key for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set SAB_API_KEY`);
+      const r = await fetch(`${dc.url}/api?mode=switch&value=${q.downloadId}&value2=0&output=json&apikey=${encodeURIComponent(dc.apiKey)}`);
       if (!r.ok) throw new Error(`sabnzbd switch ${r.status}`);
-    } else return record({ status: 'info', title, instance: a.name, detail: `queue priority not supported for ${cl.implementation}` });
-    return record({ status: 'prioritized', title, instance: a.name, detail: `moved "${q.title}" to top of ${q.downloadClient}` });
+    }
+    return record({ status: 'prioritized', title, instance: a.name, detail: `moved "${q.title}" to top of ${q.downloadClient} (${dc.url})` });
   }
   record({ status: 'info', title, instance: a.name, detail: 'replacement not in queue after 2 min; priority not set' });
 }

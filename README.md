@@ -60,12 +60,13 @@ Everything can be set with environment variables, in the web UI, or both. **A va
 | `UI_PORT` | `8080` | Web UI port. |
 | `UI_PASSWORD` | | HTTP basic auth for the UI (any username). **Set this.** The app holds your Plex token and can delete files. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
-| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | qBittorrent details, used to move the replacement to the top of the queue. |
-| `SAB_URL`, `SAB_API_KEY` | | SABnzbd details, used for the same. |
+| `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
+| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | Default qBittorrent, for setups with one. Used when no `CLIENTS` entry matches. |
+| `SAB_URL`, `SAB_API_KEY` | | Default SABnzbd, for setups with one. |
 
 ### Why the qBittorrent and SABnzbd settings exist
 
-Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
+Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). With several qBittorrent or SABnzbd instances, list each in `CLIENTS` (or the **Download clients** table in the UI). Each queued replacement is matched to its client by the host and port Sonarr/Radarr use for it, falling back to the client's name, so the right instance is always the one that gets the call. For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
 
 ## How it matches a report to a file
 
