@@ -14,7 +14,8 @@ services:
       DRY_RUN: ${DRY_RUN:-true}            # set "false" to actually delete and re-download
       POLL_SECONDS: ${POLL_SECONDS:-60}
       MAX_PER_DAY: ${MAX_PER_DAY:-48}
-      UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth, any username
+      UI_USERNAME: ${UI_USERNAME}
+      UI_PASSWORD: ${UI_PASSWORD}
       ARRS: >-
         [{
           "name":"sonarr",
