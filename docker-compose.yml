@@ -1,5 +1,6 @@
-# Every variable is optional: anything left out can be set in the web UI instead.
-# A variable set here is locked in the UI (env wins over the UI).
+# Settings come from a .env file: copy .env.example to .env, or configure Reportarr in the web UI and use
+# "Download .env" there. Every variable in .env reaches the container, so adding SONARR_3_URL, RADARR_4_KEY and so on
+# needs no change to this file. Anything set in .env is read-only in the web UI.
 services:
   app:
     image: ghcr.io/trentnbauer/reportarr:latest
@@ -8,44 +9,11 @@ services:
       - ${WEB_UI:-8080}:8080
     volumes:
       - data:/data
-    environment:
-      PLEX_URL: ${PLEX_URL:-http://plex:32400}
-      PLEX_TOKEN: ${PLEX_TOKEN}
-      DRY_RUN: ${DRY_RUN:-true}            # set "false" to actually delete and re-download
-      POLL_SECONDS: ${POLL_SECONDS:-60}
-      MAX_PER_DAY: ${MAX_PER_DAY:-48}
-      UI_USERNAME: ${UI_USERNAME:-}  # optional: if blank, any username is accepted
-      UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth
-      ARRS: >-
-        [{
-          "name":"sonarr",
-          "kind":"sonarr",
-          "url":"${SONARR_URL}",
-          "key":"${SONARR_KEY}"
-        },
-         {
-         "name":"radarr",
-         "kind":"radarr",
-         "url":"${RADARR_URL}",
-         "key":"${RADARR_KEY}"
-        }]
-      # Optional, but needed to move the replacement to the top of the download queue: Sonarr/Radarr
-      # hide their download clients' passwords and API keys, so Reportarr can't borrow them.
-      # Leave blank to skip queue priority (the replacement still downloads). URL and username fall back
-      # to the host/username from each Sonarr/Radarr download client. Use SABnzbd's full API key, not the NZB key.
-      # Several qBittorrent/SABnzbd instances: list them here. Each is matched to the one Sonarr/Radarr uses by
-      # host:port (or name). The single-client variables below are the fallback for anything not listed.
-      # CLIENTS: >-
-      #   [{"name":"qb1","kind":"qbittorrent","url":"http://qbit1:8080","username":"admin","password":"${QBIT1_PASSWORD}"},
-      #    {"name":"qb2","kind":"qbittorrent","url":"http://qbit2:8080","username":"admin","password":"${QBIT2_PASSWORD}"},
-      #    {"name":"sab1","kind":"sabnzbd","url":"http://sab1:8080","apiKey":"${SAB1_API_KEY}"}]
-      QBIT_URL: ${QBIT_URL:-}
-      QBIT_USERNAME: ${QBIT_USERNAME:-}
-      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
-      SAB_URL: ${SAB_URL:-}
-      SAB_API_KEY: ${SAB_API_KEY:-}
-    # The service names in PLEX_URL/ARRS only resolve if this stack shares a network with them. If Plex and the
-    # *arrs live in other compose projects, join their network (or use host IPs in the URLs above):
+    env_file:
+      - path: .env
+        required: false # without a .env, configure everything in the web UI
+    # The hostnames in .env (for example http://sonarr_1:8989) only resolve if this stack shares a network with them.
+    # If Plex and the *arrs live in other compose projects, join their network (or use host IPs in the URLs):
     # networks: [media]
 volumes:
   data:

@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { DATA_DIR, getConfig, publicConfig, lockedKeys, saveConfig } from './config.mjs';
+import { DATA_DIR, getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
 
 export const ratingKeyOf = (url) => url?.match(/\/library\/metadata\/(\d+)$/)?.[1];
 export const idsOf = (guids = []) => Object.fromEntries(guids.map((g) => g.id.split('://')));
@@ -310,9 +310,14 @@ export function serve() {
     try {
       if (req.url === '/api/state') {
         return send(200, 'application/json', JSON.stringify({
-          config: publicConfig(), locked: lockedKeys(), status, version: VERSION,
+          config: publicConfig(), locked: lockedKeys(), status, version: VERSION, uiConfigured: hasFileConfig(),
           changes: readJson(dataFile('changes.json'), []).reverse(),
         }));
+      }
+      if (req.url === '/api/env') {
+        res.setHeader('Content-Disposition', 'attachment; filename="reportarr.env"');
+        res.setHeader('Cache-Control', 'no-store');
+        return send(200, 'text/plain; charset=utf-8', envFile());
       }
       if (req.method === 'POST' && (req.url === '/api/config' || req.url === '/api/historic')) {
         // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
