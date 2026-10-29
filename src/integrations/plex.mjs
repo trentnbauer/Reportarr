@@ -83,13 +83,13 @@ const plex = {
     const mid = await machineId(src);
     return (await communityReports(src)).filter((n) => n.url?.startsWith(`server://${mid}/`)).map((n) => ({ ...n, kind: 'plex', source: src.name, src }));
   },
-  label: (r) => `${!r.src || r.src.name === 'plex' ? 'Plex' : r.src.name} report`,
+  reportLabel: (r) => `${!r.src || r.src.name === 'plex' ? 'Plex' : r.src.name} report`,
 
   // Replace the file a report is about: find the item on the Plex server, then the *arr that owns that exact file.
   async replace(ctx, report) {
     const { c, record } = ctx;
     const src = report.src ?? c.sources.find((x) => x.kind === 'plex'); // the Plex server this report came from
-    const base = { reportId: report.id, source: plex.label(report) };
+    const base = { reportId: report.id, source: plex.reportLabel(report) };
     const key = ratingKeyOf(report.url);
     const m = key && (await plexApi(src, `/library/metadata/${key}`)).Metadata?.[0];
     if (!m) return record({ status: 'skipped', ...base, detail: 'item no longer in Plex (already deleted or replaced): ' + report.url });
