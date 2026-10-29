@@ -10,8 +10,11 @@ const rnd = () => randomBytes(8).toString('hex'); // generated per run so the re
 const S = { pwA: rnd(), pwB: rnd(), keyA: rnd(), keyB: rnd(), token: rnd(), key: rnd(), kept: rnd(), wrong: rnd(), ui: rnd() };
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-'));
 process.env.POLL_SECONDS = '30'; // env-locked key
-const { VERSION, ratingKeyOf, idsOf, clientFor, prioritize, serve, pendingHistoric, parseBase } = await import('./app.mjs');
-const { getConfig, publicConfig, saveConfig, lockedKeys } = await import('./config.mjs');
+const { VERSION } = await import('../src/util.mjs');
+const { ratingKeyOf, idsOf } = await import('../src/integrations/plex.mjs');
+const { clientFor, prioritize, pendingHistoric } = await import('../src/engine.mjs');
+const { serve, parseBase } = await import('../src/server.mjs');
+const { getConfig, publicConfig, saveConfig, lockedKeys } = await import('../src/config.mjs');
 
 test('ratingKeyOf / idsOf parse Plex references', () => {
   assert.equal(ratingKeyOf('server://abc/com.plexapp.plugins.library/library/metadata/121709'), '121709');
@@ -162,7 +165,7 @@ test('historic reports are those seen but never acted on', () => {
 test('version is shortened for commit hashes and defaults to dev', async () => {
   assert.equal(VERSION, 'dev'); // APP_VERSION is not set when running the tests
   const run = (v) => new Promise((res) => import('node:child_process').then(({ execFile }) =>
-    execFile(process.execPath, ['-e', "import('./app.mjs').then((m) => console.log(m.VERSION))"], { env: { ...process.env, APP_VERSION: v }, cwd: path.dirname(new URL(import.meta.url).pathname) }, (e, out) => res(out.trim()))));
+    execFile(process.execPath, ['-e', "import('./src/util.mjs').then((m) => console.log(m.VERSION))"], { env: { ...process.env, APP_VERSION: v }, cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..') }, (e, out) => res(out.trim()))));
   assert.equal(await run('0123456789abcdef0123456789abcdef01234567'), '0123456');
   assert.equal(await run('v1.2.3'), 'v1.2.3');
 });
@@ -234,14 +237,14 @@ test('BASE_URL: parsing, redirect to the trailing slash, injected into the page,
 });
 
 test('the page builds its API URLs from where it is served', () => {
-  const html = fs.readFileSync(new URL('./ui.html', import.meta.url), 'utf8');
+  const html = fs.readFileSync(new URL('../ui.html', import.meta.url), 'utf8');
   assert.ok(!/['"`]\/api\//.test(html), 'no absolute /api/ paths');
   assert.match(html, /location\.pathname\.endsWith\('\/'\)/);
 });
 
 test('config file is private and the UI sends JSON', () => {
   assert.equal(fs.statSync(path.join(process.env.DATA_DIR, 'config.json')).mode & 0o077, 0);
-  assert.match(fs.readFileSync(new URL('./ui.html', import.meta.url), 'utf8'), /'Content-Type': 'application\/json'/);
+  assert.match(fs.readFileSync(new URL('../ui.html', import.meta.url), 'utf8'), /'Content-Type': 'application\/json'/);
 });
 
 test.after(() => { for (const s of [...servers, fakeArr]) s.close(); });

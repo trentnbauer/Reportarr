@@ -9,8 +9,8 @@ import { randomBytes } from 'node:crypto';
 const rnd = () => randomBytes(8).toString('hex'); // generated per run so the repo holds no secret-looking literals
 const KEY = rnd();
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-os-'));
-const { replaceIssue, poll } = await import('./app.mjs');
-const { saveConfig } = await import('./config.mjs');
+const { handleReport: replaceIssue, poll } = await import('../src/engine.mjs');
+const { saveConfig } = await import('../src/config.mjs');
 
 const calls = [];
 const listen = (handler) => new Promise((res) => { const s = http.createServer(handler).listen(0, '127.0.0.1', () => res(s)); });

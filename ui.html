@@ -32,7 +32,7 @@
   a { color:var(--accent); }
   input, select, button { font:inherit; }
   h1, h2, h3, p { margin:0; }
-  .wrap { max-width:1040px; margin-inline:auto; padding:16px 16px 0; display:flex; flex-direction:column; gap:16px; }
+  .wrap { max-width:1040px; margin-inline:auto; padding:16px 16px 56px; display:flex; flex-direction:column; gap:16px; }
   .col { display:flex; flex-direction:column; }
   .row { display:flex; flex-wrap:wrap; align-items:center; }
   .muted { color:var(--muted); }
@@ -199,19 +199,14 @@ let dirty = false, saveMsg = '', saveErr = false;
 let tab = 'activity', filter = 'all', uid = 0;
 const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
 const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients']];
-const KINDS = {
-  sources: { plex: 'Plex', seerr: 'Overseerr / Seerr' },
-  arrs: { sonarr: 'Sonarr', radarr: 'Radarr', lidarr: 'Lidarr' },
-  clients: { qbittorrent: 'qBittorrent', sabnzbd: 'SABnzbd' },
-};
-const PREFIX = { plex: 'plex', seerr: 'seerr', sonarr: 'sonarr', radarr: 'radarr', lidarr: 'lidarr', qbittorrent: 'qbit', sabnzbd: 'sab' };
-const URLS = { plex: 'http://plex:32400', seerr: 'http://overseerr:5055', sonarr: 'http://sonarr:8989', radarr: 'http://radarr:7878', lidarr: 'http://lidarr:8686', qbittorrent: 'http://qbittorrent:8080', sabnzbd: 'http://sabnzbd:8080' };
-const HKEY = { sources: 'source', arrs: 'arr', clients: 'client' };
+const K = () => state.kinds; // what each kind is called, its fields and defaults: sent by the server from its integrations
+const TARGET = { sources: 'source', arrs: 'arr', clients: 'client' };
+const HKEY = TARGET;
 const locked = (k) => state.locked.includes(k);
 
 function newDraft() {
   const c = state.config;
-  draft = { pollSeconds: c.pollSeconds, maxPerDay: c.maxPerDay, dryRun: c.dryRun };
+  draft = { pollSeconds: c.pollSeconds, maxPerDay: c.maxPerDay, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
   for (const l of ['sources', 'arrs', 'clients']) draft[l] = c[l].map((x) => ({ ...x, _id: ++uid }));
 }
 const find = (list, id) => draft[list].find((x) => x._id === +id);
@@ -235,7 +230,7 @@ const TAB_OF = { sources: 'sources', arrs: 'arr', clients: 'clients' };
 // ---- header
 function paintHeader() {
   $('version').textContent = state.version;
-  $('openwarn').classList.toggle('hidden', state.authEnabled !== false);
+  $('openwarn').classList.toggle('hidden', state.authEnabled !== false || draft.hideLoginWarning);
   const m = $('mode');
   m.className = 'mode ' + (draft.dryRun ? 'dry' : 'live'); m.disabled = locked('dryRun');
   m.title = locked('dryRun') ? 'DRY_RUN is set in the environment' : 'Click to switch; saved with Save';
@@ -313,23 +308,16 @@ function res(x) {
   return t.st === 'testing' ? '<span class="res wait">Testing…</span>' : `<span class="res ${t.st === 'ok' ? 'ok' : 'bad'}">${t.st === 'ok' ? '✓' : '✕'} ${esc(t.msg)}</span>`;
 }
 function card(list, x) {
-  const env = !!x.fromEnv, d = { dis: env, attrs: `data-list="${list}" data-id="${x._id}"` };
+  const env = !!x.fromEnv, meta = K()[list][x.kind];
   const typeDisabled = env || !x.isNew; // a saved card keeps its type; change it by removing and adding again
-  const type = `<label class="f">Type<select data-list="${list}" data-id="${x._id}" data-f="kind" ${typeDisabled ? 'disabled' : ''}>${Object.entries(KINDS[list]).map(([k, l]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
-  const f = (label, name, t, o = {}) => field(label, t ?? 'text', x[name], { ...d, attrs: `data-list="${list}" data-id="${x._id}" data-f="${name}"`, ...o });
-  const nameField = f('Name', 'name', 'text', { dis: env || !x.isNew, hint: x.isNew ? '' : '' });
-  let fields = '', extra = '';
-  if (list === 'sources') {
-    const plex = x.kind === 'plex';
-    fields = f('URL', 'url') + f(plex ? 'Token' : 'API key', 'key', 'password', { ph: x.keySet ? '(set)' : '', hint: plex ? '' : 'Settings → General' }) + (plex ? '' : f('Issue types to replace', 'issueTypes', 'text', { hint: 'video, audio, subtitles, other' }));
-    if (!plex) extra = switchBtn(`data-list="sources" data-id="${x._id}" data-flip="resolve"`, x.resolve !== false, 'Resolve issues', 'Comment and resolve after replacing', env);
-  } else if (list === 'arrs') {
-    fields = f('URL (include base path)', 'url') + f('API key', 'key', 'password', { ph: x.keySet ? '(set)' : '' });
-  } else if (x.kind === 'qbittorrent') {
-    fields = f('URL', 'url', 'text', { hint: x.default && !x.url ? 'blank: the address each *arr uses' : '' }) + f('Username', 'username') + f('Password', 'password', 'password', { ph: x.passwordSet ? '(set)' : '' });
-  } else {
-    fields = f('URL', 'url', 'text', { hint: x.default && !x.url ? 'blank: the address each *arr uses' : '' }) + f('API key (full, not NZB key)', 'apiKey', 'password', { ph: x.apiKeySet ? '(set)' : '' });
-  }
+  const type = `<label class="f">Type<select data-list="${list}" data-id="${x._id}" data-f="kind" ${typeDisabled ? 'disabled' : ''}>${Object.entries(K()[list]).map(([k, m]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`;
+  const f = (label, name, t, o = {}) => field(label, t ?? 'text', x[name], { dis: env, attrs: `data-list="${list}" data-id="${x._id}" data-f="${name}"`, ...o });
+  const nameField = f('Name', 'name', 'text', { dis: env || !x.isNew });
+  const fields = meta.fields.map((fd) => f(fd.label, fd.name, fd.type, {
+    ph: fd.set && x[fd.set] ? '(set)' : '',
+    hint: fd.hint ?? (fd.name === 'url' && x.default && !x.url ? 'blank: the address each *arr uses' : ''),
+  })).join('');
+  const extra = meta.switches.map((sw) => switchBtn(`data-list="${list}" data-id="${x._id}" data-flip="${sw.name}"`, x[sw.name] !== false, sw.label, sw.hint, env)).join('');
   return `<div class="icard" data-card="${x._id}">
     <div class="ihead"><div class="l"><span class="dot ${cardDot(list, x)}" data-dot="${list}:${esc(x.name)}:${x._id}"></span><b>${esc(x.name)}</b>${env ? '<span class="env">env</span>' : ''}${x.default ? '<span class="env" title="used for any client of this kind that is not matched by address">default</span>' : ''}</div>
       <div class="r" data-res="${x._id}">${res(x)}<button type="button" class="btn" data-test="${list}" data-id="${x._id}">Test</button>${env ? '' : `<button type="button" class="btn danger" data-remove="${list}" data-id="${x._id}">Remove</button>`}</div></div>
@@ -349,6 +337,7 @@ function renderPanel() {
         ${field('Poll interval (seconds)', 'number', draft.pollSeconds, { attrs: 'data-top="pollSeconds" min="10"', dis: locked('pollSeconds'), env: locked('pollSeconds') })}
         ${field('Max replacements per day', 'number', draft.maxPerDay, { attrs: 'data-top="maxPerDay" min="0"', dis: locked('maxPerDay'), env: locked('maxPerDay') })}
         ${switchBtn('data-flip="dryRun"', draft.dryRun, 'Dry run', 'Log only, never delete', locked('dryRun'))}
+        ${switchBtn('data-flip="hideLoginWarning"', draft.hideLoginWarning, 'Hide the no-login warning', 'Only shown when no UI password is set', locked('hideLoginWarning'))}
       </div></div>
       <div class="envrow row"><a href="${api('env')}" id="envlink" download="reportarr.env">Download .env</a><span>Your saved settings as a compose file. Contains API keys, so keep it private; rename to <code>.env</code> and restart.</span></div>`;
     return;
@@ -388,22 +377,22 @@ $('panel').addEventListener('change', (e) => {
   const t = e.target;
   if (t.dataset.f !== 'kind') return;
   const x = find(t.dataset.list, t.dataset.id); x.kind = t.value;
-  if (x.isNew) { x.name = freeName(t.dataset.list, x.kind, x._id); x.url = URLS[x.kind]; }
+  if (x.isNew) { const m = K()[t.dataset.list][x.kind]; x.name = freeName(t.dataset.list, x.kind, x._id); x.url = m.defaultUrl; for (const [k, v] of Object.entries(m.defaults)) x[k] ??= v; }
   markDirty(); renderPanel();
 });
 function freeName(list, kind, selfId) {
-  let n = 1; while (draft[list].some((y) => y._id !== selfId && y.name === `${PREFIX[kind]}-${n}`)) n++;
-  return `${PREFIX[kind]}-${n}`;
+  const p = K()[list][kind].prefix; let n = 1; while (draft[list].some((y) => y._id !== selfId && y.name === `${p}-${n}`)) n++;
+  return `${p}-${n}`;
 }
 $('panel').addEventListener('click', async (e) => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.flip) {
-    if (b.dataset.flip === 'dryRun') { draft.dryRun = !draft.dryRun; paintHeader(); }
-    else { const x = find(b.dataset.list, b.dataset.id); x.resolve = x.resolve === false; }
+    if (!b.dataset.list) { draft[b.dataset.flip] = !draft[b.dataset.flip]; paintHeader(); } // a top-level setting: dry run, hide warning
+    else { const x = find(b.dataset.list, b.dataset.id); x[b.dataset.flip] = x[b.dataset.flip] === false; }
     markDirty(); renderPanel();
   } else if (b.dataset.add) {
-    const list = b.dataset.add, kind = Object.keys(KINDS[list])[0];
-    draft[list].push({ _id: ++uid, isNew: true, kind, name: freeName(list, kind), url: URLS[kind], key: '', ...(list === 'clients' ? { username: '', password: '', apiKey: '' } : {}), ...(list === 'sources' ? { issueTypes: 'video,audio,other', resolve: true } : {}) });
+    const list = b.dataset.add, kind = Object.keys(K()[list])[0], m = K()[list][kind];
+    draft[list].push({ _id: ++uid, isNew: true, kind, name: freeName(list, kind), url: m.defaultUrl, key: '', ...m.defaults });
     markDirty(); renderPanel();
   } else if (b.dataset.remove) {
     draft[b.dataset.remove] = draft[b.dataset.remove].filter((x) => x._id !== +b.dataset.id); markDirty(); renderPanel();
@@ -414,9 +403,8 @@ $('panel').addEventListener('click', async (e) => {
 
 // Test sends the card's current values (so you can test before saving); a blank secret uses the saved one by name.
 async function runTest(list, x) {
-  const req = list === 'sources' ? { target: 'source', kind: x.kind, name: x.name, url: x.url, key: x.key }
-    : list === 'arrs' ? { target: 'arr', kind: x.kind, name: x.name, url: x.url, key: x.key }
-    : { target: 'client', kind: x.kind, name: x.name, url: x.url, username: x.username, password: x.password, apiKey: x.apiKey };
+  const req = { target: TARGET[list], kind: x.kind, name: x.name };
+  for (const fd of K()[list][x.kind].fields) req[fd.name] = x[fd.name]; // exactly what the card shows
   for (const k of Object.keys(tests)) if (+k !== x._id && tests[k].st !== 'testing') delete tests[k]; // one result at a time, as before
   tests[x._id] = { st: 'testing' }; refreshCard(list, x);
   try {
@@ -436,7 +424,7 @@ function refreshCard(list, x) { // only the result and dot, so unsaved typing is
 $('save').onclick = async () => {
   const strip = ({ _id, isNew, keySet, passwordSet, apiKeySet, fromEnv, ...rest }) => rest;
   const patch = { sources: draft.sources.filter((x) => !x.fromEnv).map(strip), arrs: draft.arrs.filter((x) => !x.fromEnv).map(strip), clients: draft.clients.filter((x) => !x.fromEnv).map(strip) };
-  for (const k of ['pollSeconds', 'maxPerDay', 'dryRun']) if (!locked(k)) patch[k] = draft[k];
+  for (const k of ['pollSeconds', 'maxPerDay', 'dryRun', 'hideLoginWarning']) if (!locked(k)) patch[k] = draft[k];
   $('save').disabled = true;
   try {
     const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });

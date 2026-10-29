@@ -7,11 +7,11 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
 const rnd = () => randomBytes(8).toString('hex'); // generated per run so the repo holds no secret-looking literals
-const dir = path.dirname(new URL(import.meta.url).pathname);
+const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'); // the repository root
 
 // Load config.mjs in a clean process with exactly these variables, like the container sees them.
 const loadConfig = (env) => JSON.parse(execFileSync(process.execPath, ['-e',
-  "import('./config.mjs').then((m) => console.log(JSON.stringify({ c: m.getConfig(), locked: m.lockedKeys() })))"],
+  "import('./src/config.mjs').then((m) => console.log(JSON.stringify({ c: m.getConfig(), locked: m.lockedKeys() })))"],
 { cwd: dir, env: { PATH: process.env.PATH, DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-env-')), ...env } }).toString());
 
 // A small dotenv parser, as docker compose reads .env files: raw, 'literal' and "escaped" values.
@@ -100,7 +100,7 @@ test('settings saved by an older version are read as sources and clients, and re
 
 test('the exported .env reproduces the same settings, including awkward characters', async () => {
   process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-export-'));
-  const { saveConfig, getConfig, envFile } = await import('./config.mjs');
+  const { saveConfig, getConfig, envFile } = await import('../src/config.mjs');
   const awkward = `p a#ss$word'"x\\${rnd()}`;
   saveConfig({
     dryRun: false, maxPerDay: 7, pollSeconds: 90,
@@ -123,8 +123,8 @@ test('the exported .env reproduces the same settings, including awkward characte
 test('the .env download needs the web UI password and carries the saved settings', async () => {
   const pass = rnd(), token = rnd();
   process.env.UI_PASSWORD = pass; process.env.UI_PORT = '0';
-  const { saveConfig } = await import('./config.mjs');
-  const { serve } = await import('./app.mjs');
+  const { saveConfig } = await import('../src/config.mjs');
+  const { serve } = await import('../src/server.mjs');
   saveConfig({ sources: [{ name: 'plex', kind: 'plex', url: 'http://plex:32400', key: token }] });
   const srv = serve(); await new Promise((r) => srv.once('listening', r));
   const url = `http://127.0.0.1:${srv.address().port}/api/env`;
@@ -140,7 +140,7 @@ test('the .env download needs the web UI password and carries the saved settings
 
 // Run code in a clean process that has these environment variables, sharing one data directory across calls.
 const inProcess = (env, code) => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
-  `import * as m from './config.mjs'; const out = await (async () => { ${code} })(); console.log(JSON.stringify(out));`],
+  `import * as m from './src/config.mjs'; const out = await (async () => { ${code} })(); console.log(JSON.stringify(out));`],
 { cwd: dir, env: { PATH: process.env.PATH, ...env } }).toString());
 
 test('instances from the environment and instances added in the UI work together', () => {
@@ -186,4 +186,15 @@ test('download clients mix the same way', () => {
   const r = inProcess(env, `m.saveConfig({ clients: [{ name: 'sab', kind: 'sabnzbd', url: 'http://s:8080', apiKey: ${JSON.stringify(rnd())} }] }); return { names: m.getConfig().clients.map((x) => x.name), pub: m.publicConfig().clients.map((x) => [x.name, x.fromEnv]) };`);
   assert.deepEqual(r.names, ['qb1', 'sab']);
   assert.deepEqual(r.pub, [['qb1', true], ['sab', false]]);
+});
+
+test('the no-login warning can be hidden: a setting in the UI, or HIDE_LOGIN_WARNING in the environment', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-warn-'));
+  // from the UI: off by default, saved, exported
+  const r = inProcess({ DATA_DIR: data }, `const before = m.getConfig().hideLoginWarning; m.saveConfig({ hideLoginWarning: true }); return { before, after: m.getConfig().hideLoginWarning, pub: m.publicConfig().hideLoginWarning, locked: m.lockedKeys(), env: /HIDE_LOGIN_WARNING=true/.test(m.envFile()) };`);
+  assert.deepEqual(r, { before: false, after: true, pub: true, locked: [], env: true });
+  // from the environment: it wins, and the UI cannot undo it
+  const e = inProcess({ DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-warn2-')), HIDE_LOGIN_WARNING: 'true' }, `m.saveConfig({ hideLoginWarning: false }); return { now: m.getConfig().hideLoginWarning, locked: m.lockedKeys() };`);
+  assert.deepEqual(e, { now: true, locked: ['hideLoginWarning'] });
+  assert.equal(loadConfig({ HIDE_LOGIN_WARNING: 'false' }).c.hideLoginWarning, false);
 });

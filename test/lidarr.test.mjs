@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-lidarr-'));
-const { replace } = await import('./app.mjs');
+const { handleReport: replace } = await import('../src/engine.mjs');
 
 const calls = [];
 const listen = (handler) => new Promise((res) => { const s = http.createServer(handler).listen(0, '127.0.0.1', () => res(s)); });

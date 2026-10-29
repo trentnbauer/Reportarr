@@ -17,7 +17,7 @@ const community = await listen(async (req, res) => {
   req.headers['x-plex-token'] === S.plex ? json(res, { data: { reports: { nodes: [] } } }) : json(res, { errors: [{ message: 'not authorized' }] }, 401);
 });
 process.env.PLEX_COMMUNITY_URL = url(community);
-const { runCheck } = await import('./checks.mjs');
+const { runCheck } = await import('../src/checks.mjs');
 
 const arrServer = (appName) => listen((req, res) => (req.url === '/api/v3/system/status' && req.headers['x-api-key'] === S.arr ? json(res, { appName, version: '4.0.20' }) : res.writeHead(req.url.startsWith('/api/v3') ? 401 : 404).end()));
 const sonarr = await arrServer('Sonarr');
