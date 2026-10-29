@@ -69,14 +69,14 @@ const seerr = {
     return (await api(src, 'GET', '/issue?take=100&filter=open&sort=added')).results
       .map((issue) => ({ id: src.name === 'overseerr' ? `overseerr:${issue.id}` : `overseerr:${src.name}:${issue.id}`, date: issue.createdAt, kind: 'seerr', source: src.name, src, issue }));
   },
-  label: (r) => `${r.src?.name === 'overseerr' ? 'Overseerr' : r.src?.name} issue #${r.issue.id} · ${ISSUE_TYPE[r.issue.issueType] ?? 'other'}`,
+  reportLabel: (r) => `${r.src?.name === 'overseerr' ? 'Overseerr' : r.src?.name} issue #${r.issue.id} · ${ISSUE_TYPE[r.issue.issueType] ?? 'other'}`,
 
   // An issue names a title (TMDB/TVDB id), not a file, so every instance holding it is replaced.
   async replace(ctx, report) {
     const { c, record } = ctx, { issue, src } = report;
     const type = ISSUE_TYPE[issue.issueType] ?? 'other';
     const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${issue.id}`;
-    const base = { reportId: report.id, source: seerr.label(report) };
+    const base = { reportId: report.id, source: seerr.reportLabel(report) };
     if (!(src.issueTypes ?? DEFAULT_TYPES).split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
       return record({ status: 'skipped', ...base, detail: `${what}: ${type} issues are not set to be replaced` });
     }

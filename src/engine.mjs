@@ -90,7 +90,7 @@ export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
 
 // ---- replacing it
 const sourceOf = (r) => SOURCES[r.kind ?? 'plex'];
-const labelOf = (r) => sourceOf(r).label(r);
+const labelOf = (r) => sourceOf(r).reportLabel(r);
 
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
 async function swap(c, report, title, hit) {
