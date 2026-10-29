@@ -1,0 +1,5 @@
+.git
+data
+.env
+*.test.mjs
+.github

@@ -1,0 +1,26 @@
+# Every variable is optional: anything left out can be set in the web UI instead.
+# A variable set here is locked in the UI (env wins over the UI).
+services:
+  reportarr:
+    image: ghcr.io/trentnbauer/reportarr:latest
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    volumes: ["./data:/data"]
+    environment:
+      PLEX_URL: http://plex:32400
+      PLEX_TOKEN: ${PLEX_TOKEN}
+      DRY_RUN: "true"            # set "false" to actually delete and re-download
+      POLL_SECONDS: "60"
+      MAX_PER_DAY: "20"
+      UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth, any username
+      ARRS: >-
+        [{"name":"sonarr1080","kind":"sonarr","url":"http://sonarr1080:8989/sonarr","key":"${SONARR1080_KEY}"},
+         {"name":"sonarr4k","kind":"sonarr","url":"http://sonarr4k:8989/s4k","key":"${SONARR4K_KEY}"},
+         {"name":"radarr1080","kind":"radarr","url":"http://radarr1080:7878/radarr","key":"${RADARR1080_KEY}"},
+         {"name":"radarr4k","kind":"radarr","url":"http://radarr4k:7878/r4k","key":"${RADARR4K_KEY}"}]
+      # Optional. By default qBittorrent/SABnzbd details are read from each Sonarr/Radarr's own download client settings.
+      # QBIT_URL: http://qbittorrent:8080
+      # QBIT_USERNAME: admin
+      # QBIT_PASSWORD: ${QBIT_PASSWORD}
+      # SAB_URL: http://sabnzbd:8080
+      # SAB_API_KEY: ${SAB_API_KEY}
