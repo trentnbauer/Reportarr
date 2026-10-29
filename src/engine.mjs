@@ -108,7 +108,7 @@ const capFull = (c, s) => {
 };
 
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
-// Returns false when the daily cap stopped it.
+// Returns false when the daily cap stopped it, else (outside dry-run) where to look for the replacement file.
 async function swap(c, s, report, title, hit) {
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = ARRS[a.kind].plan(hit);
   const base = { reportId: report.id, source: labelOf(report), title, instance: a.name };
@@ -124,6 +124,7 @@ async function swap(c, s, report, title, hit) {
   await arr(a, 'POST', '/command', plan.cmd);
   record({ status: 'replaced', ...base, detail: `deleted ${files}, blocklisted: ${!!grabbed}, search started` });
   prioritizeLater(c, a, plan.match, title, base);
+  return plan.check && { arr: a.name, check: plan.check, title }; // what watch() needs to see the new file arrive
 }
 
 // What a source's replace() is handed: the settings, the log, and the ways to find and replace files.
@@ -132,10 +133,41 @@ const context = (c, s) => ({
   locateFromPlex: (m, files, plexGet) => locateFromPlex(c, m, files, plexGet),
   locateIssue: (issue) => locateIssue(c, issue),
   swap: (report, title, hit) => swap(c, s, report, title, hit),
+  // Ask for this report to be finished (source.finish) once every item has its new file back; see checkPending.
+  watch: (report, items) => {
+    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, items, since: new Date().toISOString() });
+    writeJson(stateFile(), s);
+  },
 });
 
 // Handle one report with the source it came from.
 export const handleReport = (c, report, s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [] }) => sourceOf(report).replace(context(c, s), report);
+
+// ---- waiting for the new file
+// shortcut: gives up after a fixed 72h, make it a setting if a slow indexer ever needs longer.
+const PENDING_MAX_MS = 72 * 3600_000;
+
+// Replacements wait here until Sonarr/Radarr report a file for every item again, then the source finishes the report
+// (Seerr resolves the issue). Slow or failed downloads leave the issue open; after PENDING_MAX_MS it is left for a person.
+export async function checkPending(c, s) {
+  const keep = [];
+  for (const p of s.pending ?? []) {
+    const src = c.sources.find((x) => x.name === p.source), base = { reportId: p.reportId, source: p.source };
+    if (!src) { record({ status: 'error', ...base, detail: `${p.source} is no longer configured: not waiting for its replacement` }); continue; }
+    if (Date.now() - Date.parse(p.since) > PENDING_MAX_MS) { record({ status: 'skipped', ...base, detail: `no replacement imported within ${PENDING_MAX_MS / 3600_000}h: left open` }); continue; }
+    try {
+      const arrs = p.items.map((i) => c.arrs.find((a) => a.name === i.arr));
+      const have = await Promise.all(p.items.map((i, n) => arrs[n] && arr(arrs[n], 'GET', i.check).then((x) => !!x?.hasFile)));
+      if (have.some((h) => h === undefined)) { record({ status: 'error', ...base, detail: 'an *arr instance is no longer configured: not waiting for its replacement' }); continue; }
+      if (!have.every(Boolean)) { keep.push(p); continue; }
+      await SOURCES[p.kind].finish(context(c, s), src, p);
+    } catch (e) {
+      if (!p.failed) record({ status: 'error', ...base, detail: `checking the replacement failed (will retry): ${e.message}` });
+      keep.push({ ...p, failed: true });
+    }
+  }
+  s.pending = keep;
+}
 
 // ---- the loop
 // Reports that existed before the app first ran (s.baseline) and are still open: never acted on automatically.
@@ -246,6 +278,7 @@ export async function poll() {
     }
   }
   for (const id of retries.splice(0)) await retry(c, s, nodes, id);
+  await checkPending(c, s);
   writeJson(stateFile(), s);
   status.historic = pendingHistoric(nodes, s.baseline).length;
   return errors.join('; ');

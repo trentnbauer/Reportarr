@@ -17,8 +17,10 @@ const listen = (handler) => new Promise((res) => { const s = http.createServer(h
 const json = (res, v) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(v)); };
 const route = (name) => (req) => { const u = new URL(req.url, 'http://x'); calls.push(`${req.method} ${name} ${u.pathname}${u.search}`); return u; };
 
+let imported = false; // flips when the replacement files "arrive" in Sonarr/Radarr
 const radarr = await listen((req, res) => {
   const u = route('radarr')(req);
+  if (u.pathname === '/api/v3/movie/1') return json(res, { id: 1, hasFile: imported });
   if (u.pathname === '/api/v3/movie') return json(res, u.searchParams.get('tmdbId') === '603' ? [{ id: 1, title: 'The Matrix', hasFile: true, movieFile: { id: 5 } }] : []);
   if (u.pathname === '/api/v3/history/movie') return json(res, [{ id: 77 }]);
   if (u.pathname === '/api/v3/queue') return json(res, { records: [] });
@@ -32,6 +34,7 @@ const eps = [
 ];
 const sonarr = await listen((req, res) => {
   const u = route('sonarr')(req);
+  if (/^\/api\/v3\/episode\/\d+$/.test(u.pathname)) return json(res, { hasFile: imported });
   if (u.pathname === '/api/v3/series') return json(res, u.searchParams.get('tvdbId') === '81189' || !u.search ? [{ id: 3, title: 'Show', tmdbId: 1399 }] : []);
   if (u.pathname === '/api/v3/episode') return json(res, eps);
   if (u.pathname === '/api/v3/history') return json(res, { records: [{ id: 88 }] });
@@ -55,11 +58,11 @@ const issue = (id, media, extra = {}) => ({ id, issueType: 1, status: 1, problem
 const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, kind: 'seerr', source: 'overseerr', src: cfg.sources[0], issue: i }); return calls.filter((c) => !c.includes('GET')); };
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
 
-test('a movie issue deletes the file, blocklists, searches, then comments and resolves', async () => {
+test('a movie issue deletes the file, blocklists, searches, then comments but does not resolve yet', async () => {
   const w = await run(issue(1, movie));
   assert.deepEqual(w, [
     'DELETE radarr /api/v3/moviefile/5', 'POST radarr /api/v3/history/failed/77', 'POST radarr /api/v3/command',
-    'POST overseerr /api/v1/issue/1/comment', 'POST overseerr /api/v1/issue/1/resolved']);
+    'POST overseerr /api/v1/issue/1/comment']);
 });
 
 test('an episode issue replaces only that episode; a season issue replaces every episode with a file in it', async () => {
@@ -98,7 +101,32 @@ test('a source configured for the first time is baselined, then only new issues 
   issues = [issue(10, movie), issue(11, tv, { problemSeason: 2, problemEpisode: 1 })];
   calls.length = 0; await poll();
   assert.deepEqual(calls.filter((c) => c.startsWith('DELETE')), ['DELETE sonarr /api/v3/episodefile/103']);
-  assert.ok(calls.includes('POST overseerr /api/v1/issue/11/resolved') && !calls.some((c) => c.includes('/issue/10/')));
+  assert.ok(calls.includes('POST overseerr /api/v1/issue/11/comment') && !calls.some((c) => c.includes('/issue/10/')));
+  assert.ok(!calls.includes('POST overseerr /api/v1/issue/11/resolved'), 'not resolved while the file is missing');
+});
+
+test('the issue is resolved only once the replacement file is back, and only once', async () => {
+  issues = [];
+  calls.length = 0; await poll();
+  assert.ok(!calls.some((c) => c.includes('/resolved')), 'still waiting');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'state.json'), 'utf8')).pending.some((p) => p.ref === 11), true, 'wait survives in the state file');
+  imported = true;
+  calls.length = 0; await poll();
+  assert.ok(calls.includes('POST overseerr /api/v1/issue/11/resolved'));
+  assert.match(changes().at(-1).detail, /replacement imported, resolved/);
+  calls.length = 0; await poll();
+  assert.ok(!calls.some((c) => c.includes('/resolved')), 'not resolved a second time');
+  imported = false;
+});
+
+test('a replacement that never arrives is left open after the wait runs out', async () => {
+  const sf = path.join(process.env.DATA_DIR, 'state.json'), s = JSON.parse(fs.readFileSync(sf, 'utf8'));
+  s.pending = [{ reportId: 'overseerr:99', kind: 'seerr', source: 'overseerr', ref: 99, items: [{ arr: 'sonarr', check: '/episode/13', title: 'x' }], since: new Date(Date.now() - 73 * 3600_000).toISOString() }];
+  fs.writeFileSync(sf, JSON.stringify(s));
+  calls.length = 0; await poll();
+  assert.ok(!calls.some((c) => c.includes('/issue/99/')));
+  assert.match(changes().at(-1).detail, /left open/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')).pending, []);
 });
 
 test('a bad API key surfaces as an error, not a crash', async () => {

@@ -36,7 +36,7 @@ const sonarr = {
   // what to call to find the grabbed release, delete the file, search again, and spot the new grab in the queue
   plan: ({ ep }) => ({
     hist: `/history?episodeId=${ep.id}&eventType=1&pageSize=1&sortKey=date&sortDirection=descending`,
-    del: (id) => `/episodefile/${id}`, cmd: { name: 'EpisodeSearch', episodeIds: [ep.id] }, match: { episodeId: ep.id },
+    del: (id) => `/episodefile/${id}`, cmd: { name: 'EpisodeSearch', episodeIds: [ep.id] }, match: { episodeId: ep.id }, check: `/episode/${ep.id}`,
   }),
 };
 export default sonarr;

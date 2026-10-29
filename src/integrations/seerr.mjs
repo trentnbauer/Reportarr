@@ -1,5 +1,5 @@
-// Overseerr / Seerr: a report source. Users report an issue on a title; Reportarr replaces its file(s) and then
-// comments on and resolves the issue. Everything specific to it lives here.
+// Overseerr / Seerr: a report source. Users report an issue on a title; Reportarr replaces its file(s), comments, and
+// resolves the issue once the new file(s) are imported. Everything specific to it lives here.
 import { trim, get, work, pass, fail, need, envNumbers } from '../util.mjs';
 
 // Overseerr names issue types by number
@@ -29,7 +29,7 @@ const seerr = {
     { name: 'key', label: 'API key', type: 'password', set: 'keySet', hint: 'Settings → General' },
     { name: 'issueTypes', label: 'Issue types to replace', hint: 'video, audio, subtitles, other' },
   ],
-  switches: [{ name: 'resolve', label: 'Resolve issues', hint: 'Comment and resolve after replacing' }],
+  switches: [{ name: 'resolve', label: 'Resolve issues', hint: 'Comment after replacing, resolve once the new file is imported' }],
   defaults: { issueTypes: DEFAULT_TYPES, resolve: true },
 
   // OVERSEERR_URL + OVERSEERR_KEY is one instance; OVERSEERR_2_URL / _KEY / _NAME / _ISSUE_TYPES / _RESOLVE are more
@@ -86,13 +86,24 @@ const seerr = {
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
     let capped = false;
-    for (const hit of hits) if ((await ctx.swap(report, hit.title, hit)) === false) capped = true;
+    const items = [];
+    for (const hit of hits) { const done = await ctx.swap(report, hit.title, hit); if (done === false) capped = true; else if (done) items.push(done); }
     if (c.dryRun || src.resolve === false || capped) return; // capped: leave the issue open, not every file was replaced
+    // The issue is resolved later, by finish(), once Sonarr/Radarr have the new file(s): Seerr tells the reporter when it is resolved.
     try {
-      await api(src, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}.` });
-      await api(src, 'POST', `/issue/${issue.id}/resolved`);
-      record({ status: 'info', ...base, detail: `${what}: commented and resolved` });
-    } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment/resolve: ${e.message}` }); }
+      await api(src, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${hits.length === 1 ? 'file is' : 'files are'} imported.` });
+    } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment: ${e.message}` }); }
+    if (items.length) {
+      ctx.watch(report, items);
+      record({ status: 'info', ...base, detail: `${what}: waiting for ${items.length} replacement file(s) before resolving` });
+    }
+  },
+
+  // Called by the engine when every replacement file is back.
+  async finish({ record }, src, p) {
+    const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${p.ref}`;
+    await api(src, 'POST', `/issue/${p.ref}/resolved`);
+    record({ status: 'info', reportId: p.reportId, source: p.source, detail: `${what}: replacement imported, resolved` });
   },
 };
 export default seerr;
