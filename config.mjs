@@ -51,22 +51,42 @@ const fromEnv = () => Object.entries(ENV).filter(([, v]) => v !== undefined && v
 const readFile = () => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return {}; } };
 
 export const hasFileConfig = () => Object.keys(readFile()).length > 0;
-export const lockedKeys = () => fromEnv().map(([k]) => k);
-export const getConfig = () => ({ ...DEFAULTS, ...readFile(), ...Object.fromEntries(fromEnv()) });
+// The instance and download client lists merge instead of locking: what the environment defines is read-only, and
+// anything added in the UI is kept next to it (an environment entry wins if a name is used twice).
+const LISTS = ['arrs', 'clients'];
+const envList = (k) => (Array.isArray(ENV[k]) ? ENV[k] : []);
+const merge = (fromEnvList, fromFile = []) => [...fromEnvList, ...fromFile.filter((f) => !fromEnvList.some((e2) => e2.name === f.name))];
+const envNames = (k) => envList(k).map((x) => x.name);
+export const lockedKeys = () => fromEnv().map(([k]) => k).filter((k) => !LISTS.includes(k));
+export const getConfig = () => {
+  const file = readFile();
+  return { ...DEFAULTS, ...file, ...Object.fromEntries(fromEnv()), arrs: merge(envList('arrs'), file.arrs), clients: merge(envList('clients'), file.clients) };
+};
 
 // Secrets never leave the server; the UI only learns whether one is set.
 export function publicConfig() {
   const c = getConfig();
   const out = {
     ...c,
-    arrs: c.arrs.map(({ key, ...a }) => ({ ...a, keySet: !!key })),
-    clients: c.clients.map(({ password, apiKey, ...x }) => ({ ...x, passwordSet: !!password, apiKeySet: !!apiKey })),
+    arrs: c.arrs.map(({ key, ...a }) => ({ ...a, keySet: !!key, fromEnv: envNames('arrs').includes(a.name) })),
+    clients: c.clients.map(({ password, apiKey, ...x }) => ({ ...x, passwordSet: !!password, apiKeySet: !!apiKey, fromEnv: envNames('clients').includes(x.name) })),
   };
   for (const k of SECRETS) { out[k] = ''; out[k + 'Set'] = !!c[k]; }
   return out;
 }
 
+// names must be unique, and must not reuse one set by an environment variable (those are read-only here)
+function uniqueNames(list = [], k, what) {
+  const seen = new Set(envNames(k));
+  for (const x of list) {
+    if (seen.has(x.name)) throw new Error(`${what} name "${x.name}" is already used${envNames(k).includes(x.name) ? ' by one set in the environment' : ''}: pick another`);
+    seen.add(x.name);
+  }
+}
+
 export function validate(patch) {
+  uniqueNames(patch.arrs, 'arrs', 'instance');
+  uniqueNames(patch.clients, 'clients', 'download client');
   for (const x of patch.clients ?? []) {
     if (!x.name || !CLIENT_KINDS.includes(x.kind) || !/^https?:\/\//.test(x.url)) {
       throw new Error(`invalid download client "${x.name ?? ''}": needs name, kind qbittorrent|sabnzbd and an http(s) url`);
@@ -86,16 +106,16 @@ export function saveConfig(patch) {
   const cur = readFile();
   const locked = new Set(lockedKeys());
   for (const [k, v] of Object.entries(patch)) {
-    if (!(k in DEFAULTS) || locked.has(k)) continue;
+    if (!(k in DEFAULTS) || locked.has(k) || LISTS.includes(k)) continue;
     if (SECRETS.includes(k) && v === '') continue; // blank = keep current (shortcut: a secret can't be cleared from the UI)
     cur[k] = v;
   }
-  if (patch.arrs && !locked.has('arrs')) {
-    const old = getConfig().arrs;
+  if (patch.arrs) {
+    const old = readFile().arrs ?? []; // only the UI-added ones are stored; the environment's stay in the environment
     cur.arrs = patch.arrs.map((a) => ({ name: a.name, kind: a.kind, url: a.url.replace(/\/$/, ''), key: a.key || old.find((o) => o.name === a.name)?.key || '' }));
   }
-  if (patch.clients && !locked.has('clients')) {
-    const old = getConfig().clients;
+  if (patch.clients) {
+    const old = readFile().clients ?? [];
     cur.clients = patch.clients.map((x) => {
       const o = old.find((y) => y.name === x.name);
       return { name: x.name, kind: x.kind, url: x.url.replace(/\/$/, ''), username: x.username ?? '', password: x.password || o?.password || '', apiKey: x.apiKey || o?.apiKey || '' };

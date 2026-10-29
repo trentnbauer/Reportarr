@@ -29,6 +29,7 @@
   a.btn { display:inline-block; padding:8px 14px; border:1px solid var(--line); border-radius:6px; color:var(--fg); font-weight:600; text-decoration:none; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
   .client { display:grid; grid-template-columns:1fr 120px 2fr 1fr 1fr 1fr auto; gap:8px; align-items:end; margin-bottom:8px; }
+  .addrow { display:flex; flex-wrap:wrap; gap:8px; }
   .tests { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .rowtest { grid-column:1 / -1; font-size:13px; margin:-4px 0 4px; }
   .arr { display:grid; grid-template-columns:1fr 110px 2fr 1.5fr auto; gap:8px; align-items:end; margin-bottom:8px; }
@@ -59,10 +60,15 @@ try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light'
     <button type="button" class="ghost" data-test="sab">Test SABnzbd (default)</button>
     <span id="testresult" class="muted" role="status"></span>
   </p>
-  <h3>Sonarr / Radarr / Lidarr instances <span id="arrlock"></span></h3>
+  <h3>Sonarr / Radarr / Lidarr instances</h3>
+  <p class="muted">Instances set in the environment are read-only. Anything you add here is kept alongside them.</p>
   <div id="arrs"></div>
-  <button type="button" class="ghost" id="addarr">Add instance</button>
-  <h3>Download clients <span id="clientlock"></span></h3>
+  <span class="addrow">
+    <button type="button" class="ghost" data-add="sonarr">Add Sonarr</button>
+    <button type="button" class="ghost" data-add="radarr">Add Radarr</button>
+    <button type="button" class="ghost" data-add="lidarr">Add Lidarr</button>
+  </span>
+  <h3>Download clients</h3>
   <p class="muted">For moving the replacement to the top of the queue. Each is matched to the one Sonarr/Radarr uses by host:port (or name). The "default" fields above apply when none match.</p>
   <div id="clients"></div>
   <button type="button" class="ghost" id="addclient">Add download client</button>
@@ -141,32 +147,25 @@ function render() {
 }
 
 function renderArrs() {
-  const lock = state.locked.includes('arrs');
-  document.getElementById('arrlock').innerHTML = lock ? '<span class="badge">env</span>' : '';
-  document.getElementById('addarr').hidden = lock;
-  document.getElementById('arrs').innerHTML = arrs.map((a, i) => `<div class="arr">
-    <label>Name<input data-i="${i}" data-k="name" value="${esc(a.name)}" ${lock ? 'disabled' : ''}></label>
-    <label>Kind<select data-i="${i}" data-k="kind" ${lock ? 'disabled' : ''}>${['sonarr', 'radarr', 'lidarr'].map((k) => `<option ${a.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-    <label>URL (include base path)<input data-i="${i}" data-k="url" value="${esc(a.url)}" ${lock ? 'disabled' : ''}></label>
-    <label>API key<input type="password" data-i="${i}" data-k="key" placeholder="${a.keySet ? '(set)' : ''}" ${lock ? 'disabled' : ''}></label>
-    ${lock ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}
-    <div class="rowtest"><button type="button" class="ghost" data-test="arr" data-i="${i}">Test</button> <span class="muted" data-result="arr${i}" role="status"></span></div></div>`).join('');
+  document.getElementById('arrs').innerHTML = arrs.map((a, i) => { const d = a.fromEnv ? 'disabled' : ''; return `<div class="arr">
+    <label>Name${a.fromEnv ? ' <span class="badge">env</span>' : ''}<input data-i="${i}" data-k="name" value="${esc(a.name)}" ${d}></label>
+    <label>Kind<select data-i="${i}" data-k="kind" ${d}>${['sonarr', 'radarr', 'lidarr'].map((k) => `<option ${a.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+    <label>URL (include base path)<input data-i="${i}" data-k="url" value="${esc(a.url)}" ${d}></label>
+    <label>API key<input type="password" data-i="${i}" data-k="key" placeholder="${a.keySet ? '(set)' : ''}" ${d}></label>
+    ${a.fromEnv ? '' : `<button type="button" class="ghost" data-del="${i}">Remove</button>`}
+    <div class="rowtest"><button type="button" class="ghost" data-test="arr" data-i="${i}">Test</button> <span class="muted" data-result="arr${i}" role="status"></span></div></div>`; }).join('');
 }
 
 function renderClients() {
-  const lock = state.locked.includes('clients');
-  document.getElementById('clientlock').innerHTML = lock ? '<span class="badge">env</span>' : '';
-  document.getElementById('addclient').hidden = lock;
-  const d = lock ? 'disabled' : '';
-  document.getElementById('clients').innerHTML = clients.map((x, i) => `<div class="client">
-    <label>Name<input data-c="${i}" data-k="name" value="${esc(x.name)}" ${d}></label>
+  document.getElementById('clients').innerHTML = clients.map((x, i) => { const d = x.fromEnv ? 'disabled' : ''; return `<div class="client">
+    <label>Name${x.fromEnv ? ' <span class="badge">env</span>' : ''}<input data-c="${i}" data-k="name" value="${esc(x.name)}" ${d}></label>
     <label>Kind<select data-c="${i}" data-k="kind" ${d}><option ${x.kind === 'qbittorrent' ? 'selected' : ''}>qbittorrent</option><option ${x.kind === 'sabnzbd' ? 'selected' : ''}>sabnzbd</option></select></label>
     <label>URL<input data-c="${i}" data-k="url" value="${esc(x.url)}" ${d}></label>
     <label>Username<input data-c="${i}" data-k="username" value="${esc(x.username)}" ${d}></label>
     <label>Password<input type="password" data-c="${i}" data-k="password" placeholder="${x.passwordSet ? '(set)' : ''}" ${d}></label>
     <label>API key<input type="password" data-c="${i}" data-k="apiKey" placeholder="${x.apiKeySet ? '(set)' : ''}" ${d}></label>
-    ${lock ? '' : `<button type="button" class="ghost" data-delc="${i}">Remove</button>`}
-    <div class="rowtest"><button type="button" class="ghost" data-test="client" data-c="${i}">Test</button> <span class="muted" data-result="client${i}" role="status"></span></div></div>`).join('');
+    ${x.fromEnv ? '' : `<button type="button" class="ghost" data-delc="${i}">Remove</button>`}
+    <div class="rowtest"><button type="button" class="ghost" data-test="client" data-c="${i}">Test</button> <span class="muted" data-result="client${i}" role="status"></span></div></div>`; }).join('');
 }
 document.getElementById('clients').addEventListener('input', (e) => { const { c, k } = e.target.dataset; if (c !== undefined) clients[c][k] = e.target.value; });
 document.getElementById('clients').addEventListener('click', (e) => { if (e.target.dataset.delc !== undefined) { clients.splice(+e.target.dataset.delc, 1); renderClients(); } });
@@ -201,7 +200,14 @@ document.getElementById('addclient').onclick = () => { clients.push({ name: '', 
 
 document.getElementById('arrs').addEventListener('input', (e) => { const { i, k } = e.target.dataset; if (i !== undefined) arrs[i][k] = e.target.value; });
 document.getElementById('arrs').addEventListener('click', (e) => { if (e.target.dataset.del !== undefined) { arrs.splice(+e.target.dataset.del, 1); renderArrs(); } });
-document.getElementById('addarr').onclick = () => { arrs.push({ name: '', kind: 'sonarr', url: 'http://', key: '' }); renderArrs(); };
+// "Add Sonarr/Radarr/Lidarr": a new row with a free name (radarr-2, radarr-3, ...) and the app's usual address to start from
+const PORTS = { sonarr: 8989, radarr: 7878, lidarr: 8686 };
+document.querySelectorAll('[data-add]').forEach((btn) => { btn.onclick = () => {
+  const kind = btn.dataset.add; let n = arrs.filter((a) => a.kind === kind).length + 1;
+  while (arrs.some((a) => a.name === `${kind}-${n}`)) n++;
+  arrs.push({ name: `${kind}-${n}`, kind, url: `http://${kind}:${PORTS[kind]}`, key: '' }); renderArrs();
+  document.querySelector(`#arrs .arr:last-child [data-k=key]`)?.focus();
+}; });
 
 document.getElementById('form').onsubmit = async (e) => {
   e.preventDefault();
@@ -211,8 +217,9 @@ document.getElementById('form').onsubmit = async (e) => {
     if (el.disabled) continue;
     patch[k] = type === 'checkbox' ? el.checked : type === 'number' ? +el.value : el.value;
   }
-  if (!state.locked.includes('arrs')) patch.arrs = arrs.map(({ keySet, ...a }) => a);
-  if (!state.locked.includes('clients')) patch.clients = clients.map(({ passwordSet, apiKeySet, ...x }) => x);
+  // environment-defined rows are read-only; only the ones added here are saved
+  patch.arrs = arrs.filter((a) => !a.fromEnv).map(({ keySet, fromEnv, ...a }) => a);
+  patch.clients = clients.filter((x) => !x.fromEnv).map(({ passwordSet, apiKeySet, fromEnv, ...x }) => x);
   const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
   document.getElementById('msg').textContent = r.ok ? 'Saved. Applies on the next poll.' : (await r.json()).error;
   if (r.ok) load();
