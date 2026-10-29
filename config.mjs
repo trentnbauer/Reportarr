@@ -9,19 +9,31 @@ const e = process.env;
 // The apps Reportarr can replace files in. Lidarr's API is v1, the others v3.
 export const ARR_KINDS = ['sonarr', 'radarr', 'lidarr'];
 export const ARR_API = { sonarr: 'v3', radarr: 'v3', lidarr: 'v1' };
+export const SOURCE_KINDS = ['plex', 'seerr']; // where reports come from: Plex "Reported Issues", Overseerr/Seerr issues
+export const CLIENT_KINDS = ['qbittorrent', 'sabnzbd'];
+export const ISSUE_TYPES = ['video', 'audio', 'subtitles', 'other'];
+const DEFAULT_TYPES = 'video,audio,other';
 
-export const SECRETS = ['plexToken', 'qbitPassword', 'sabApiKey', 'overseerrKey'];
 const DEFAULTS = {
-  plexUrl: 'http://plex:32400', plexToken: '', pollSeconds: 60, maxPerDay: 20, dryRun: true,
-  // Overseerr/Seerr issues are a second source of reports. Types: video, audio, subtitles, other.
-  overseerrUrl: '', overseerrKey: '', overseerrTypes: 'video,audio,other', overseerrResolve: true,
+  pollSeconds: 60, maxPerDay: 20, dryRun: true,
+  // [{name, kind: 'plex'|'seerr', url, key, issueTypes, resolve}]: issueTypes and resolve only apply to seerr
+  sources: [],
   // [{name, kind: 'sonarr'|'radarr'|'lidarr', url, key}]
   arrs: [],
-  // [{name, kind: 'qbittorrent'|'sabnzbd', url, username, password, apiKey}], matched to the arr's client by host:port or name
+  // [{name, kind: 'qbittorrent'|'sabnzbd', url, username, password, apiKey, default}], matched to the arr's client by
+  // host:port or name; a `default` one (the old single QBIT_*/SAB_* settings) is used when none matches
   clients: [],
-  // default client per kind, used when no entry in `clients` matches (single-client setups)
-  qbitUrl: '', qbitUsername: '', qbitPassword: '', sabUrl: '', sabApiKey: '',
 };
+
+const trim = (u) => String(u ?? '').trim().replace(/\/+$/, '');
+export const normalizeTypes = (v) => {
+  const t = String(v ?? '').split(',').map((s) => s.trim().toLowerCase()).filter((s, i, a) => ISSUE_TYPES.includes(s) && a.indexOf(s) === i);
+  return (t.length ? t : DEFAULT_TYPES.split(',')).join(',');
+};
+
+// The numbers n for which PREFIX_n_URL, _KEY or _NAME is set, in order: PLEX_2_URL gives 2.
+const numbers = (K) => [...new Set(Object.keys(e).map((k) => k.match(new RegExp(`^${K}_(\\d+)_(?:URL|KEY|NAME)$`))?.[1]).filter(Boolean))].sort((a, b) => a - b);
+
 // Instances come from numbered variables, any number of them: SONARR_1_URL, SONARR_1_KEY, SONARR_2_URL, ... and the same for RADARR.
 // An optional SONARR_1_NAME sets the display name. The same works for LIDARR_N_*. Unnumbered SONARR_URL/SONARR_KEY still work, and so does the older ARRS JSON.
 function arrsFromEnv() {
@@ -36,43 +48,78 @@ function arrsFromEnv() {
   }
   return [...(e.ARRS ? JSON.parse(e.ARRS) : []), ...out];
 }
+
+// Report sources: PLEX_URL + PLEX_KEY (or PLEX_TOKEN) is one Plex server, PLEX_2_URL/PLEX_2_KEY/PLEX_2_NAME are more;
+// OVERSEERR_URL/OVERSEERR_KEY is one Overseerr/Seerr, OVERSEERR_2_URL/KEY/NAME/ISSUE_TYPES/RESOLVE are more.
+function sourcesFromEnv() {
+  const out = [];
+  const plexKey = e.PLEX_KEY || e.PLEX_TOKEN;
+  if (plexKey) out.push({ name: e.PLEX_NAME || 'plex', kind: 'plex', url: trim(e.PLEX_URL || 'http://plex:32400'), key: plexKey });
+  for (const n of numbers('PLEX')) {
+    const p = `PLEX_${n}`;
+    if (e[`${p}_URL`]) out.push({ name: e[`${p}_NAME`] || `plex-${n}`, kind: 'plex', url: trim(e[`${p}_URL`]), key: e[`${p}_KEY`] ?? e[`${p}_TOKEN`] ?? '' });
+  }
+  if (e.OVERSEERR_URL) out.push({ name: e.OVERSEERR_NAME || 'overseerr', kind: 'seerr', url: trim(e.OVERSEERR_URL), key: e.OVERSEERR_KEY || e.OVERSEERR_API_KEY || '', issueTypes: normalizeTypes(e.OVERSEERR_ISSUE_TYPES), resolve: e.OVERSEERR_RESOLVE !== 'false' });
+  for (const n of numbers('OVERSEERR')) {
+    const p = `OVERSEERR_${n}`;
+    if (e[`${p}_URL`]) out.push({ name: e[`${p}_NAME`] || `seerr-${n}`, kind: 'seerr', url: trim(e[`${p}_URL`]), key: e[`${p}_KEY`] ?? '', issueTypes: normalizeTypes(e[`${p}_ISSUE_TYPES`]), resolve: e[`${p}_RESOLVE`] !== 'false' });
+  }
+  return out;
+}
+
+// Download clients: CLIENTS is a JSON list. The older single QBIT_* and SAB_* settings become one read-only client each, used
+// as the default for any client of that kind not matched by address (a blank URL means "the host the arr has for it").
+function clientsFromEnv() {
+  const out = e.CLIENTS ? JSON.parse(e.CLIENTS) : [];
+  if (e.QBIT_URL || e.QBIT_USERNAME || e.QBIT_PASSWORD) out.push({ name: 'qbittorrent', kind: 'qbittorrent', url: trim(e.QBIT_URL), username: e.QBIT_USERNAME ?? '', password: e.QBIT_PASSWORD ?? '', apiKey: '', default: true });
+  if (e.SAB_URL || e.SAB_API_KEY) out.push({ name: 'sabnzbd', kind: 'sabnzbd', url: trim(e.SAB_URL), username: '', password: '', apiKey: e.SAB_API_KEY ?? '', default: true });
+  return out;
+}
+
 const ENV = {
-  plexUrl: e.PLEX_URL, plexToken: e.PLEX_KEY || e.PLEX_TOKEN,
   pollSeconds: e.POLL_SECONDS && +e.POLL_SECONDS, maxPerDay: e.MAX_PER_DAY && +e.MAX_PER_DAY,
   dryRun: e.DRY_RUN && e.DRY_RUN !== 'false',
-  overseerrUrl: e.OVERSEERR_URL, overseerrKey: e.OVERSEERR_KEY || e.OVERSEERR_API_KEY, overseerrTypes: e.OVERSEERR_ISSUE_TYPES,
-  overseerrResolve: e.OVERSEERR_RESOLVE && e.OVERSEERR_RESOLVE !== 'false',
-  arrs: arrsFromEnv(),
-  clients: e.CLIENTS && JSON.parse(e.CLIENTS),
-  qbitUrl: e.QBIT_URL, qbitUsername: e.QBIT_USERNAME, qbitPassword: e.QBIT_PASSWORD,
-  sabUrl: e.SAB_URL, sabApiKey: e.SAB_API_KEY,
+  sources: sourcesFromEnv(), arrs: arrsFromEnv(), clients: clientsFromEnv(),
 };
 const fromEnv = () => Object.entries(ENV).filter(([, v]) => v !== undefined && v !== '' && !(Array.isArray(v) && !v.length));
-const readFile = () => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return {}; } };
+
+// Settings saved by older versions (single Plex, Overseerr, default qBittorrent/SABnzbd) are read as list entries.
+const LEGACY = ['plexUrl', 'plexToken', 'overseerrUrl', 'overseerrKey', 'overseerrTypes', 'overseerrResolve', 'qbitUrl', 'qbitUsername', 'qbitPassword', 'sabUrl', 'sabApiKey'];
+function migrate(file) {
+  if (!LEGACY.some((k) => k in file)) return file;
+  const f = { ...file }, sources = [...(f.sources ?? [])], clients = [...(f.clients ?? [])];
+  if (f.plexToken) sources.unshift({ name: 'plex', kind: 'plex', url: trim(f.plexUrl || 'http://plex:32400'), key: f.plexToken });
+  if (f.overseerrUrl) sources.push({ name: 'overseerr', kind: 'seerr', url: trim(f.overseerrUrl), key: f.overseerrKey ?? '', issueTypes: normalizeTypes(f.overseerrTypes), resolve: f.overseerrResolve !== false });
+  if (f.qbitUrl || f.qbitUsername || f.qbitPassword) clients.push({ name: 'qbittorrent', kind: 'qbittorrent', url: trim(f.qbitUrl), username: f.qbitUsername ?? '', password: f.qbitPassword ?? '', apiKey: '', default: true });
+  if (f.sabUrl || f.sabApiKey) clients.push({ name: 'sabnzbd', kind: 'sabnzbd', url: trim(f.sabUrl), username: '', password: '', apiKey: f.sabApiKey ?? '', default: true });
+  for (const k of LEGACY) delete f[k];
+  return { ...f, sources, clients };
+}
+const readFile = () => { try { return migrate(JSON.parse(fs.readFileSync(FILE, 'utf8'))); } catch { return {}; } };
 
 export const hasFileConfig = () => Object.keys(readFile()).length > 0;
-// The instance and download client lists merge instead of locking: what the environment defines is read-only, and
-// anything added in the UI is kept next to it (an environment entry wins if a name is used twice).
-const LISTS = ['arrs', 'clients'];
+
+// The lists merge instead of locking: what the environment defines is read-only, and anything added in the UI is kept
+// next to it (an environment entry wins if a name is used twice).
+const LISTS = ['sources', 'arrs', 'clients'];
 const envList = (k) => (Array.isArray(ENV[k]) ? ENV[k] : []);
 const merge = (fromEnvList, fromFile = []) => [...fromEnvList, ...fromFile.filter((f) => !fromEnvList.some((e2) => e2.name === f.name))];
 const envNames = (k) => envList(k).map((x) => x.name);
 export const lockedKeys = () => fromEnv().map(([k]) => k).filter((k) => !LISTS.includes(k));
 export const getConfig = () => {
   const file = readFile();
-  return { ...DEFAULTS, ...file, ...Object.fromEntries(fromEnv()), arrs: merge(envList('arrs'), file.arrs), clients: merge(envList('clients'), file.clients) };
+  return { ...DEFAULTS, ...file, ...Object.fromEntries(fromEnv()), sources: merge(envList('sources'), file.sources), arrs: merge(envList('arrs'), file.arrs), clients: merge(envList('clients'), file.clients) };
 };
 
 // Secrets never leave the server; the UI only learns whether one is set.
 export function publicConfig() {
   const c = getConfig();
-  const out = {
-    ...c,
+  return {
+    pollSeconds: c.pollSeconds, maxPerDay: c.maxPerDay, dryRun: c.dryRun,
+    sources: c.sources.map(({ key, ...s }) => ({ ...s, keySet: !!key, fromEnv: envNames('sources').includes(s.name) })),
     arrs: c.arrs.map(({ key, ...a }) => ({ ...a, keySet: !!key, fromEnv: envNames('arrs').includes(a.name) })),
     clients: c.clients.map(({ password, apiKey, ...x }) => ({ ...x, passwordSet: !!password, apiKeySet: !!apiKey, fromEnv: envNames('clients').includes(x.name) })),
   };
-  for (const k of SECRETS) { out[k] = ''; out[k + 'Set'] = !!c[k]; }
-  return out;
 }
 
 // names must be unique, and must not reuse one set by an environment variable (those are read-only here)
@@ -83,42 +130,48 @@ function uniqueNames(list = [], k, what) {
     seen.add(x.name);
   }
 }
+const isUrl = (u) => /^https?:\/\//.test(u);
 
 export function validate(patch) {
+  uniqueNames(patch.sources, 'sources', 'source');
   uniqueNames(patch.arrs, 'arrs', 'instance');
   uniqueNames(patch.clients, 'clients', 'download client');
+  for (const s of patch.sources ?? []) {
+    if (!s.name || !SOURCE_KINDS.includes(s.kind) || !isUrl(s.url)) throw new Error(`invalid source "${s.name ?? ''}": needs name, kind plex|seerr and an http(s) url`);
+  }
   for (const x of patch.clients ?? []) {
-    if (!x.name || !CLIENT_KINDS.includes(x.kind) || !/^https?:\/\//.test(x.url)) {
+    if (!x.name || !CLIENT_KINDS.includes(x.kind) || !(isUrl(x.url) || (x.default && !x.url))) {
       throw new Error(`invalid download client "${x.name ?? ''}": needs name, kind qbittorrent|sabnzbd and an http(s) url`);
     }
   }
   for (const a of patch.arrs ?? []) {
-    if (!a.name || !ARR_KINDS.includes(a.kind) || !/^https?:\/\//.test(a.url)) {
-      throw new Error(`invalid instance "${a.name ?? ''}": needs name, kind sonarr|radarr|lidarr and an http(s) url`);
-    }
+    if (!a.name || !ARR_KINDS.includes(a.kind) || !isUrl(a.url)) throw new Error(`invalid instance "${a.name ?? ''}": needs name, kind sonarr|radarr|lidarr and an http(s) url`);
   }
+  if ('pollSeconds' in patch && !(Number.isInteger(+patch.pollSeconds) && +patch.pollSeconds >= 10 && +patch.pollSeconds <= 86400)) throw new Error('poll interval must be a whole number of seconds from 10 to 86400');
+  if ('maxPerDay' in patch && !(Number.isInteger(+patch.maxPerDay) && +patch.maxPerDay >= 0 && +patch.maxPerDay <= 10000)) throw new Error('max replacements per day must be a whole number from 0 to 10000');
 }
-
-const CLIENT_KINDS = ['qbittorrent', 'sabnzbd'];
 
 export function saveConfig(patch) {
   validate(patch);
-  const cur = readFile();
+  const file = readFile();
+  const cur = { ...file };
   const locked = new Set(lockedKeys());
-  for (const [k, v] of Object.entries(patch)) {
-    if (!(k in DEFAULTS) || locked.has(k) || LISTS.includes(k)) continue;
-    if (SECRETS.includes(k) && v === '') continue; // blank = keep current (shortcut: a secret can't be cleared from the UI)
-    cur[k] = v;
+  if ('pollSeconds' in patch && !locked.has('pollSeconds')) cur.pollSeconds = +patch.pollSeconds;
+  if ('maxPerDay' in patch && !locked.has('maxPerDay')) cur.maxPerDay = +patch.maxPerDay;
+  if ('dryRun' in patch && !locked.has('dryRun')) cur.dryRun = !!patch.dryRun;
+  // only the UI-added entries are stored; the environment's stay in the environment. A blank secret keeps the stored one.
+  const keep = (list, name) => (list ?? []).find((o) => o.name === name);
+  if (patch.sources) {
+    cur.sources = patch.sources.map((s) => ({
+      name: s.name, kind: s.kind, url: trim(s.url), key: s.key || keep(file.sources, s.name)?.key || '',
+      ...(s.kind === 'seerr' ? { issueTypes: normalizeTypes(s.issueTypes), resolve: s.resolve !== false } : {}),
+    }));
   }
-  if (patch.arrs) {
-    const old = readFile().arrs ?? []; // only the UI-added ones are stored; the environment's stay in the environment
-    cur.arrs = patch.arrs.map((a) => ({ name: a.name, kind: a.kind, url: a.url.replace(/\/$/, ''), key: a.key || old.find((o) => o.name === a.name)?.key || '' }));
-  }
+  if (patch.arrs) cur.arrs = patch.arrs.map((a) => ({ name: a.name, kind: a.kind, url: trim(a.url), key: a.key || keep(file.arrs, a.name)?.key || '' }));
   if (patch.clients) {
-    const old = readFile().clients ?? [];
     cur.clients = patch.clients.map((x) => {
-      const o = old.find((y) => y.name === x.name);
-      return { name: x.name, kind: x.kind, url: x.url.replace(/\/$/, ''), username: x.username ?? '', password: x.password || o?.password || '', apiKey: x.apiKey || o?.apiKey || '' };
+      const o = keep(file.clients, x.name);
+      return { name: x.name, kind: x.kind, url: trim(x.url), username: x.username ?? '', password: x.password || o?.password || '', apiKey: x.apiKey || o?.apiKey || '', ...(x.default ? { default: true } : {}) };
     });
   }
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -134,19 +187,21 @@ const q = (v) => {
 export function envFile(c = getConfig()) {
   const L = ['# Reportarr settings, exported from the web UI. Contains secrets: keep it private and never commit it.', '# Save as .env next to docker-compose.yml.', ''];
   const add = (k, v) => L.push(`${k}=${q(v)}`);
-  add('PLEX_URL', c.plexUrl); add('PLEX_KEY', c.plexToken);
+  c.sources.filter((s) => s.kind === 'plex').forEach((s, i) => {
+    L.push('', `# ${s.name}`); add(`PLEX_${i + 1}_NAME`, s.name); add(`PLEX_${i + 1}_URL`, s.url); add(`PLEX_${i + 1}_KEY`, s.key);
+  });
+  c.sources.filter((s) => s.kind === 'seerr').forEach((s, i) => {
+    const p = `OVERSEERR_${i + 1}`;
+    L.push('', `# ${s.name}`); add(`${p}_NAME`, s.name); add(`${p}_URL`, s.url); add(`${p}_KEY`, s.key); add(`${p}_ISSUE_TYPES`, s.issueTypes ?? DEFAULT_TYPES); add(`${p}_RESOLVE`, s.resolve !== false);
+  });
   for (const kind of ARR_KINDS) {
     c.arrs.filter((a) => a.kind === kind).forEach((a, i) => {
       L.push('', `# ${a.name}`);
       add(`${kind.toUpperCase()}_${i + 1}_NAME`, a.name); add(`${kind.toUpperCase()}_${i + 1}_URL`, a.url); add(`${kind.toUpperCase()}_${i + 1}_KEY`, a.key);
     });
   }
-  L.push('');
-  add('OVERSEERR_URL', c.overseerrUrl); add('OVERSEERR_KEY', c.overseerrKey); add('OVERSEERR_ISSUE_TYPES', c.overseerrTypes); add('OVERSEERR_RESOLVE', c.overseerrResolve);
   L.push(''); add('DRY_RUN', c.dryRun); add('POLL_SECONDS', c.pollSeconds); add('MAX_PER_DAY', c.maxPerDay);
-  L.push(''); add('QBIT_URL', c.qbitUrl); add('QBIT_USERNAME', c.qbitUsername); add('QBIT_PASSWORD', c.qbitPassword);
-  add('SAB_URL', c.sabUrl); add('SAB_API_KEY', c.sabApiKey);
-  if (c.clients.length) add('CLIENTS', JSON.stringify(c.clients));
+  if (c.clients.length) { L.push(''); add('CLIENTS', JSON.stringify(c.clients)); }
   L.push('', '# Not stored by the UI: set these yourself.', 'WEB_UI=8080', 'UI_USERNAME=', 'UI_PASSWORD=', '');
   return L.join('\n');
 }

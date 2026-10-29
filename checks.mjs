@@ -73,25 +73,20 @@ const CHECKS = {
   },
 };
 
-// req is what the UI sends: the values currently in the form. Blank secrets fall back to the saved ones.
+// req is what the UI sends for one card: the values currently in the form. Blank secrets fall back to the saved ones by name.
 export async function runCheck(c, req = {}) {
+  const by = (list) => (list ?? []).find((x) => x.name === req.name && req.name);
   let target, args;
   switch (req.target) {
-    case 'plex':
-      [target, args] = ['plex', { url: trim(req.plexUrl || c.plexUrl), token: req.plexToken || c.plexToken }]; break;
-    case 'overseerr':
-      [target, args] = ['overseerr', { url: trim(req.overseerrUrl || c.overseerrUrl), key: req.overseerrKey || c.overseerrKey }]; break;
-    case 'arr': {
-      const stored = c.arrs.find((a) => a.name === req.name);
-      [target, args] = ['arr', { kind: req.kind, url: trim(req.url), key: req.key || stored?.key }]; break;
+    case 'source': {
+      const key = req.key || by(c.sources)?.key;
+      [target, args] = req.kind === 'plex' ? ['plex', { url: trim(req.url), token: key }] : ['overseerr', { url: trim(req.url), key }]; break;
     }
+    case 'arr': [target, args] = ['arr', { kind: req.kind, url: trim(req.url), key: req.key || by(c.arrs)?.key }]; break;
     case 'client': {
-      const stored = c.clients.find((x) => x.name === req.name && req.name);
-      if (req.kind === 'qbittorrent') {
-        [target, args] = ['qbittorrent', { url: trim(req.url || stored?.url || c.qbitUrl), username: req.username || stored?.username || c.qbitUsername, password: req.password || stored?.password || c.qbitPassword }];
-      } else {
-        [target, args] = ['sabnzbd', { url: trim(req.url || stored?.url || c.sabUrl), apiKey: req.apiKey || stored?.apiKey || c.sabApiKey }];
-      }
+      const s = by(c.clients);
+      if (req.kind === 'qbittorrent') [target, args] = ['qbittorrent', { url: trim(req.url || s?.url), username: req.username || s?.username, password: req.password || s?.password }];
+      else [target, args] = ['sabnzbd', { url: trim(req.url || s?.url), apiKey: req.apiKey || s?.apiKey }];
       break;
     }
     default: return fail('Unknown test');

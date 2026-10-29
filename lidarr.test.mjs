@@ -26,7 +26,7 @@ const lidarr = await listen(async (req, res) => {
   if (u.pathname === '/api/v1/queue') return json(res, { records: [] });
   res.end();
 });
-const c = (over = {}) => ({ dryRun: false, clients: [], plexUrl: `http://127.0.0.1:${plex.address().port}`, plexToken: 't', arrs: [{ name: 'music', kind: 'lidarr', url: `http://127.0.0.1:${lidarr.address().port}`, key: 'k' }], ...over });
+const c = (over = {}) => ({ dryRun: false, clients: [], sources: [{ name: 'plex', kind: 'plex', url: `http://127.0.0.1:${plex.address().port}`, key: 't' }], arrs: [{ name: 'music', kind: 'lidarr', url: `http://127.0.0.1:${lidarr.address().port}`, key: 'k' }], ...over });
 const report = { id: 'r1', url: 'server://x/com.plexapp.plugins.library/library/metadata/5' };
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
 const writes = () => calls.filter((x) => !x.startsWith('GET'));

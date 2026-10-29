@@ -46,13 +46,13 @@ const overseerr = await listen((req, res) => {
   res.end();
 });
 
-const base = { dryRun: false, clients: [], qbitUrl: '', qbitUsername: '', qbitPassword: '', sabUrl: '', sabApiKey: '',
-  overseerrUrl: `http://127.0.0.1:${overseerr.address().port}/`, overseerrKey: KEY, overseerrTypes: 'video,audio,other', overseerrResolve: true,
+const SRC = { name: 'overseerr', kind: 'seerr', url: `http://127.0.0.1:${overseerr.address().port}/`, key: KEY, issueTypes: 'video,audio,other', resolve: true };
+const base = { dryRun: false, clients: [], sources: [SRC],
   arrs: [{ name: 'radarr', kind: 'radarr', url: `http://127.0.0.1:${radarr.address().port}`, key: 'k' }, { name: 'sonarr', kind: 'sonarr', url: `http://127.0.0.1:${sonarr.address().port}`, key: 'k' }] };
 const movie = { tmdbId: 603, tvdbId: null, mediaType: 'movie' };
 const tv = { tmdbId: 1399, tvdbId: 81189, mediaType: 'tv' };
 const issue = (id, media, extra = {}) => ({ id, issueType: 1, status: 1, problemSeason: 0, problemEpisode: 0, media, createdAt: '2026-10-29T00:00:00Z', ...extra });
-const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, source: 'overseerr', issue: i }); return calls.filter((c) => !c.includes('GET')); };
+const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, kind: 'seerr', source: 'overseerr', src: cfg.sources[0], issue: i }); return calls.filter((c) => !c.includes('GET')); };
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
 
 test('a movie issue deletes the file, blocklists, searches, then comments and resolves', async () => {
@@ -85,12 +85,12 @@ test('subtitle issues, whole-series issues and unknown titles are skipped withou
 
 test('dry run and "resolve off" leave Overseerr alone', async () => {
   assert.deepEqual(await run(issue(8, movie), { ...base, dryRun: true }), []);
-  const w = await run(issue(9, movie), { ...base, overseerrResolve: false });
+  const w = await run(issue(9, movie), { ...base, sources: [{ ...SRC, resolve: false }] });
   assert.ok(w.includes('DELETE radarr /api/v3/moviefile/5') && !w.some((c) => c.includes('overseerr')));
 });
 
 test('a source configured for the first time is baselined, then only new issues are acted on', async () => {
-  saveConfig({ overseerrUrl: base.overseerrUrl, overseerrKey: KEY, dryRun: false, arrs: base.arrs });
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs });
   issues = [issue(10, movie)];
   calls.length = 0; await poll();
   assert.ok(!calls.some((c) => c.startsWith('DELETE')), 'existing issue must not be actioned');
@@ -102,7 +102,7 @@ test('a source configured for the first time is baselined, then only new issues 
 });
 
 test('a bad API key surfaces as an error, not a crash', async () => {
-  saveConfig({ overseerrKey: 'wrong-' + rnd() });
+  saveConfig({ sources: [{ ...SRC, key: 'wrong-' + rnd() }] });
   await assert.rejects(poll(), /overseerr: overseerr GET \/issue.* 403/);
 });
 

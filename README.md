@@ -2,7 +2,7 @@
 
 Automagically fix Plex reports.
 
-When a user uses Plex's **Report an issue** (or an Overseerr/Seerr issue) on a title (bad quality, wrong movie, broken file), Reportarr finds the reported file in Sonarr, Radarr or Lidarr, deletes it, blocklists the release it came from, and searches again. Nobody has to hand-manage anything.
+When a user uses Plex's **Report an issue** (on any of your Plex servers, or an Overseerr/Seerr issue on any of your instances) on a title (bad quality, wrong movie, broken file), Reportarr finds the reported file in Sonarr, Radarr or Lidarr, deletes it, blocklists the release it came from, and searches again. Nobody has to hand-manage anything.
 
 > **Built by Claude.** This app was written by [Claude](https://claude.com/claude-code) (Anthropic's AI coding assistant) working with the repository owner, and has been tested against a real Plex, Sonarr, Radarr, qBittorrent and SABnzbd setup. Treat it like any young project: start in dry-run mode, read the code, and keep backups of anything you can't re-download.
 
@@ -54,12 +54,11 @@ Everything can be set with environment variables (the `.env` file), in the web U
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PLEX_URL` | `http://plex:32400` | Your Plex server. |
-| `PLEX_KEY` | | Plex server owner's token. Needed to read reports. (`PLEX_TOKEN` also works.) |
+| `PLEX_URL`, `PLEX_KEY` | | A Plex server and its owner's token (needed to read reports). `PLEX_TOKEN` also works for the key. For more servers number them: `PLEX_2_URL`, `PLEX_2_KEY`, `PLEX_2_NAME`, `PLEX_3_*`, and so on, as many as you have. |
 | `SONARR_1_URL`, `SONARR_1_KEY`, `RADARR_1_URL`, `RADARR_1_KEY`, `LIDARR_1_URL`, `LIDARR_1_KEY` | | Your Sonarr, Radarr and Lidarr (music) instances. Number them 1, 2, 3, and so on, as many as you have (`SONARR_2_URL`, `RADARR_3_KEY`, `LIDARR_2_URL`, ...). Include any URL base path. `SONARR_1_NAME` optionally sets the display name (default `sonarr-1`). Unnumbered `SONARR_URL`/`SONARR_KEY` and the older `ARRS` JSON list also still work. |
-| `OVERSEERR_URL`, `OVERSEERR_KEY` | | Your Overseerr/Seerr and its API key (Settings, General). Leave blank to skip Overseerr. |
-| `OVERSEERR_ISSUE_TYPES` | `video,audio,other` | Which issue types replace the file: `video`, `audio`, `subtitles`, `other`. |
-| `OVERSEERR_RESOLVE` | `true` | Comment on and resolve the Overseerr issue after replacing. |
+| `OVERSEERR_URL`, `OVERSEERR_KEY` | | An Overseerr/Seerr and its API key (Settings, General). Leave blank to skip Overseerr. More instances: `OVERSEERR_2_URL`, `OVERSEERR_2_KEY`, `OVERSEERR_2_NAME`, and so on. |
+| `OVERSEERR_ISSUE_TYPES`, `OVERSEERR_2_ISSUE_TYPES`, ... | `video,audio,other` | Which issue types replace the file: `video`, `audio`, `subtitles`, `other`. |
+| `OVERSEERR_RESOLVE`, `OVERSEERR_2_RESOLVE`, ... | `true` | Comment on and resolve the Overseerr issue after replacing. |
 | `DRY_RUN` | `true` | Log what would happen without deleting anything. |
 | `POLL_SECONDS` | `60` | How often to check for new reports. |
 | `MAX_PER_DAY` | `20` | Maximum replacements per day. |
@@ -70,8 +69,8 @@ Everything can be set with environment variables (the `.env` file), in the web U
 | `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** If it is blank there is no login at all: the page just loads, with a warning banner. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
 | `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
-| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | Default qBittorrent, for setups with one. Used when no `CLIENTS` entry matches. |
-| `SAB_URL`, `SAB_API_KEY` | | Default SABnzbd, for setups with one. |
+| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | One qBittorrent, for setups with one. Shown as a read-only "default" download client, used when no other client matches by address. |
+| `SAB_URL`, `SAB_API_KEY` | | One SABnzbd, the same way. |
 
 ### Behind a reverse proxy, under a path
 
@@ -102,9 +101,15 @@ media.example.com {
 
 If your proxy does not strip the prefix (for example `reverse_proxy /reportarr/* reportarr:8080` in Caddy), that works too; set `BASE_URL=https://media.example.com/reportarr`. The login, if you set one, is HTTP basic auth, which proxies pass through unchanged. Keep it behind TLS.
 
+### The web UI
+
+The page has five tabs. **Activity** shows whether polling is healthy, how many replacements happened today out of your daily limit, a coloured dot for every source, \*arr instance and download client, and the list of changes (filter by Replaced, Dry run, Skipped or Failed). **App settings**, **Sources** (Plex servers and Overseerr/Seerr instances), **\*arr suite** and **Download clients** hold the settings, one card per instance, with a sticky **Save** bar that warns you about unsaved changes. Sources and \*arr instances are checked automatically (sources on every poll, \*arr instances every few minutes); download clients only when you press Test, because logging in repeatedly can get you banned. Your theme choice (auto, dark, light) is remembered, and the tab you are on is kept in the URL.
+
+**Several Plex servers.** Each Plex source takes only the reports for its own server (reports name the server they are about, and one Plex account can own several), so two servers on one account, or servers on different accounts, each get their own reports. Each Overseerr/Seerr instance is polled separately, and issue numbers may repeat between instances.
+
 ### Test buttons
 
-Each integration in the settings has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr instance, every download client, and the default qBittorrent and SABnzbd. It checks the values currently in the form, so you can test before saving, and a blank secret uses the one you saved. A check makes the same kind of call the app makes (for example it confirms the Plex token can read reports, that an address really is Sonarr and not Radarr, and that the SABnzbd key is the full one) and times out after 10 seconds. Results never show keys or passwords. A test only reads; it never changes anything in the service.
+Each card has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr/Lidarr instance and every download client. It checks the values currently in the card, so you can test before saving, and a blank secret uses the one you saved. A check makes the same kind of call the app makes (for example it confirms the Plex token can read reports, that an address really is Sonarr and not Radarr, and that the SABnzbd key is the full one) and times out after 10 seconds. Results never show keys or passwords. A test only reads; it never changes anything in the service.
 
 ### Moving UI settings into compose
 
