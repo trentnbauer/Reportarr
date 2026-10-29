@@ -6,9 +6,11 @@ export const DATA_DIR = process.env.DATA_DIR ?? '/data';
 const FILE = path.join(DATA_DIR, 'config.json');
 const e = process.env;
 
-export const SECRETS = ['plexToken', 'qbitPassword', 'sabApiKey'];
+export const SECRETS = ['plexToken', 'qbitPassword', 'sabApiKey', 'overseerrKey'];
 const DEFAULTS = {
   plexUrl: 'http://plex:32400', plexToken: '', pollSeconds: 60, maxPerDay: 20, dryRun: true,
+  // Overseerr/Seerr issues are a second source of reports. Types: video, audio, subtitles, other.
+  overseerrUrl: '', overseerrKey: '', overseerrTypes: 'video,audio,other', overseerrResolve: true,
   // [{name, kind: 'sonarr'|'radarr', url, key}]
   arrs: [],
   // [{name, kind: 'qbittorrent'|'sabnzbd', url, username, password, apiKey}], matched to the arr's client by host:port or name
@@ -20,6 +22,8 @@ const ENV = {
   plexUrl: e.PLEX_URL, plexToken: e.PLEX_TOKEN,
   pollSeconds: e.POLL_SECONDS && +e.POLL_SECONDS, maxPerDay: e.MAX_PER_DAY && +e.MAX_PER_DAY,
   dryRun: e.DRY_RUN && e.DRY_RUN !== 'false',
+  overseerrUrl: e.OVERSEERR_URL, overseerrKey: e.OVERSEERR_API_KEY, overseerrTypes: e.OVERSEERR_ISSUE_TYPES,
+  overseerrResolve: e.OVERSEERR_RESOLVE && e.OVERSEERR_RESOLVE !== 'false',
   arrs: e.ARRS && JSON.parse(e.ARRS),
   clients: e.CLIENTS && JSON.parse(e.CLIENTS),
   qbitUrl: e.QBIT_URL, qbitUsername: e.QBIT_USERNAME, qbitPassword: e.QBIT_PASSWORD,

@@ -1,4 +1,4 @@
-// Polls Plex "Reported Issues"; for each new report deletes the reported file in
+// Polls Plex "Reported Issues" and Overseerr/Seerr issues; for each new report deletes the reported file in
 // Sonarr/Radarr, blocklists the release it came from, searches again and moves the
 // new grab to the top of the download queue. A small web UI shows changes and settings.
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import { DATA_DIR, getConfig, publicConfig, lockedKeys, saveConfig } from './con
 export const ratingKeyOf = (url) => url?.match(/\/library\/metadata\/(\d+)$/)?.[1];
 export const idsOf = (guids = []) => Object.fromEntries(guids.map((g) => g.id.split('://')));
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref()); // unref: a pending wait must not keep the process alive
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const dataFile = (n) => path.join(DATA_DIR, n);
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -56,6 +56,20 @@ const reports = async (c) => {
   if (!r.ok || j.errors) throw new Error('reports query failed: ' + JSON.stringify(j.errors ?? r.status));
   return j.data.reports.nodes;
 };
+
+const overseerr = async (c, method, p, body) => {
+  const r = await fetch(`${c.overseerrUrl.replace(/\/$/, '')}/api/v1${p}`, {
+    method,
+    headers: { 'X-Api-Key': c.overseerrKey, 'Content-Type': 'application/json' },
+    body: body && JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`overseerr ${method} ${p} ${r.status}`);
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+};
+// shortcut: only the 100 newest open issues are read, upgrade to paging if you ever have more open at once
+const overseerrIssues = async (c) => (await overseerr(c, 'GET', '/issue?take=100&filter=open&sort=added')).results
+  .map((issue) => ({ id: `overseerr:${issue.id}`, date: issue.createdAt, source: 'overseerr', issue }));
 
 // Find the arr instance + item that owns one of the reported file names.
 async function locate(c, m, files) {
@@ -121,17 +135,9 @@ export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
   record({ status: 'info', title, instance: a.name, detail: 'replacement not in queue after 2 min; priority not set' });
 }
 
-async function replace(c, report) {
-  const key = ratingKeyOf(report.url);
-  const m = key && (await plex(c, `/library/metadata/${key}`)).Metadata?.[0];
-  if (!m) return record({ status: 'skipped', reportId: report.id, detail: 'item no longer in Plex (already deleted or replaced): ' + report.url });
-  const title = `${m.grandparentTitle ? m.grandparentTitle + ' ' : ''}${m.title}`;
-  const files = new Set(m.Media.flatMap((x) => x.Part.map((p) => path.basename(p.file))));
-  const hit = await locate(c, m, files);
-  if (!hit) return record({ status: 'skipped', reportId: report.id, title, detail: 'no Sonarr/Radarr instance owns ' + [...files] });
-  const { a, ep, movie, fileId } = hit;
+// Delete one file, blocklist the release it came from, search again and push the new grab to the top of the queue.
+async function swap(c, report, title, { a, ep, movie, fileId }) {
   if (c.dryRun) return record({ status: 'dry-run', reportId: report.id, title, instance: a.name, detail: `would delete file ${fileId}, blocklist, search` });
-
   const hist = await arr(a, 'GET', ep ? `/history?episodeId=${ep.id}&eventType=1&pageSize=1&sortKey=date&sortDirection=descending`
     : `/history/movie?movieId=${movie.id}&eventType=1`);
   const grabbed = (hist.records ?? hist)[0];
@@ -141,6 +147,63 @@ async function replace(c, report) {
   record({ status: 'replaced', reportId: report.id, title, instance: a.name, detail: `deleted file ${fileId}, blocklisted: ${!!grabbed}, search started` });
   prioritize(c, a, (r) => (ep ? r.episodeId === ep.id : r.movieId === movie.id), title)
     .catch((e) => record({ status: 'error', reportId: report.id, title, instance: a.name, detail: 'priority failed: ' + e.message }));
+}
+
+async function replace(c, report) {
+  const key = ratingKeyOf(report.url);
+  const m = key && (await plex(c, `/library/metadata/${key}`)).Metadata?.[0];
+  if (!m) return record({ status: 'skipped', reportId: report.id, detail: 'item no longer in Plex (already deleted or replaced): ' + report.url });
+  const title = `${m.grandparentTitle ? m.grandparentTitle + ' ' : ''}${m.title}`;
+  const files = new Set(m.Media.flatMap((x) => x.Part.map((p) => path.basename(p.file))));
+  const hit = await locate(c, m, files);
+  if (!hit) return record({ status: 'skipped', reportId: report.id, title, detail: 'no Sonarr/Radarr instance owns ' + [...files] });
+  await swap(c, report, title, hit);
+}
+
+// Overseerr issues name a title (TMDB/TVDB id), not a file, so every instance holding it is replaced.
+const ISSUE_TYPE = { 1: 'video', 2: 'audio', 3: 'subtitles', 4: 'other' };
+
+async function locateIssue(c, issue) {
+  const { tmdbId, tvdbId, mediaType } = issue.media;
+  const hits = [];
+  if (mediaType === 'movie') {
+    for (const a of c.arrs.filter((x) => x.kind === 'radarr')) {
+      const [movie] = await arr(a, 'GET', `/movie?tmdbId=${tmdbId}`);
+      if (movie?.hasFile) hits.push({ a, movie, fileId: movie.movieFile.id, title: movie.title });
+    }
+  } else {
+    for (const a of c.arrs.filter((x) => x.kind === 'sonarr')) {
+      const series = tvdbId ? (await arr(a, 'GET', `/series?tvdbId=${tvdbId}`))[0]
+        : (await arr(a, 'GET', '/series')).find((x) => x.tmdbId === tmdbId);
+      if (!series) continue;
+      const eps = await arr(a, 'GET', `/episode?seriesId=${series.id}&includeEpisodeFile=true`);
+      for (const ep of eps.filter((e) => e.hasFile && e.seasonNumber === issue.problemSeason && (!issue.problemEpisode || e.episodeNumber === issue.problemEpisode))) {
+        hits.push({ a, ep, fileId: ep.episodeFile.id, title: `${series.title} S${String(ep.seasonNumber).padStart(2, '0')}E${String(ep.episodeNumber).padStart(2, '0')}` });
+      }
+    }
+  }
+  return hits;
+}
+
+export async function replaceIssue(c, report) {
+  const { issue } = report;
+  const type = ISSUE_TYPE[issue.issueType] ?? 'other';
+  const label = `Overseerr issue #${issue.id}`;
+  if (!c.overseerrTypes.split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
+    return record({ status: 'skipped', reportId: report.id, detail: `${label}: ${type} issues are not set to be replaced` });
+  }
+  if (issue.media.mediaType === 'tv' && !issue.problemSeason) {
+    return record({ status: 'skipped', reportId: report.id, detail: `${label}: reported against the whole series, which is not replaced automatically` });
+  }
+  const hits = await locateIssue(c, issue);
+  if (!hits.length) return record({ status: 'skipped', reportId: report.id, detail: `${label}: no Sonarr/Radarr instance has a file for this title` });
+  for (const hit of hits) await swap(c, report, hit.title, hit);
+  if (c.dryRun || !c.overseerrResolve) return;
+  try {
+    await overseerr(c, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}.` });
+    await overseerr(c, 'POST', `/issue/${issue.id}/resolved`);
+    record({ status: 'info', reportId: report.id, detail: `${label}: commented and resolved` });
+  } catch (e) { record({ status: 'error', reportId: report.id, detail: `${label}: could not comment/resolve: ${e.message}` }); }
 }
 
 // Reports that existed before the app first ran: seen, but never acted on (no entry in the changes log).
@@ -163,20 +226,41 @@ async function act(c, s, r, { retryable = false } = {}) {
   }
   s.count++;
   writeJson(dataFile('state.json'), s);
-  await replace(c, r).catch((e) => record({ status: 'error', reportId: r.id, detail: e.message }));
+  await (r.source === 'overseerr' ? replaceIssue : replace)(c, r).catch((e) => record({ status: 'error', reportId: r.id, detail: e.message }));
   return true;
 }
 
-async function poll() {
-  const c = getConfig();
-  if (!c.plexToken || !c.arrs.length) throw new Error('not configured: set a Plex token and at least one Sonarr/Radarr instance');
-  const nodes = (await reports(c)).sort((x, y) => x.date.localeCompare(y.date));
-  let s = readJson(dataFile('state.json'), null);
-  if (!s) { // first run: existing reports predate this app, never act on them automatically
-    writeJson(dataFile('state.json'), { seen: nodes.map((n) => n.id), day: '', count: 0 });
-    status.historic = nodes.length;
-    return record({ status: 'info', detail: `baselined ${nodes.length} existing reports; only new ones will be acted on (use the button in the UI to action them)` });
+// Fetch every configured source; one being down must not stop the others.
+async function fetchSources(c) {
+  const nodes = [], ok = new Set(), errors = [];
+  const sources = [
+    ['plex', c.plexToken && (() => reports(c))],
+    ['overseerr', c.overseerrUrl && c.overseerrKey && (() => overseerrIssues(c))],
+  ];
+  for (const [name, get] of sources) {
+    if (!get) continue;
+    try { nodes.push(...(await get()).map((n) => ({ source: 'plex', ...n }))); ok.add(name); } catch (e) { errors.push(`${name}: ${e.message}`); }
   }
+  return { nodes: nodes.sort((x, y) => x.date.localeCompare(y.date)), ok, errors };
+}
+
+export async function poll() {
+  const c = getConfig();
+  if (!(c.plexToken || (c.overseerrUrl && c.overseerrKey)) || !c.arrs.length) {
+    throw new Error('not configured: set a Plex token or Overseerr URL and key, and at least one Sonarr/Radarr instance');
+  }
+  const { nodes, ok, errors } = await fetchSources(c);
+  if (!ok.size) throw new Error(errors.join('; '));
+  const s = readJson(dataFile('state.json'), null) ?? { seen: [], day: '', count: 0, sources: [] };
+  s.sources ??= ['plex']; // state files from before Overseerr support only ever saw Plex
+  // a source seen for the first time (first run, or newly configured) is baselined: what it already holds is never acted on automatically
+  for (const src of ok.values()) {
+    if (s.sources.includes(src)) continue;
+    const ids = nodes.filter((n) => n.source === src).map((n) => n.id);
+    s.seen.push(...ids); s.sources.push(src);
+    record({ status: 'info', detail: `baselined ${ids.length} existing ${src} report(s); only new ones will be acted on (use the button in the UI to action them)` });
+  }
+  writeJson(dataFile('state.json'), s);
   for (const r of nodes.filter((n) => !s.seen.includes(n.id))) {
     s.seen.push(r.id); // mark first: a crash must not retry a delete
     await act(c, s, r);
@@ -191,6 +275,7 @@ async function poll() {
     }
   }
   status.historic = pendingHistoric(nodes, s.seen, readJson(dataFile('changes.json'), [])).length;
+  return errors.join('; ');
 }
 
 const sha = (v) => crypto.createHash('sha256').update(v).digest();
@@ -245,7 +330,7 @@ export function serve() {
 async function main() {
   serve();
   for (;;) {
-    await poll().then(() => { status.lastError = null; }, (e) => { status.lastError = e.message; log('poll error', e.message); });
+    await poll().then((partial) => { status.lastError = partial || null; if (partial) log('poll error', partial); }, (e) => { status.lastError = e.message; log('poll error', e.message); });
     status.lastPoll = new Date().toISOString();
     await new Promise((r) => { wake = r; setTimeout(r, getConfig().pollSeconds * 1000); }); // the UI button wakes it early
   }
