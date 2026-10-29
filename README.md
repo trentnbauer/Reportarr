@@ -12,7 +12,7 @@ When a user uses Plex's **Report an issue** on a title (bad quality, wrong movie
 2. For each **new** report, resolves the reported item to its file, then to the Sonarr/Radarr instance that owns that exact file. Multiple instances (for example 1080p and 4K) are supported.
 3. Deletes the file, marks the grabbed release as failed (which blocklists it), and starts a search for a replacement.
 4. Optionally moves the replacement to the top of the qBittorrent or SABnzbd queue.
-5. Shows every action, and your settings, in a small web UI on port 8080.
+5. Shows every action, and your settings, in a small web UI on port 8080. Reports that were already open when Reportarr first started are left alone, but a button in the UI can action them (or dry-run them) when you want.
 
 The report text is ignored on purpose: any report on a file means "replace this file".
 
@@ -37,13 +37,14 @@ services:
       PLEX_URL: http://plex:32400
       PLEX_TOKEN: ${PLEX_TOKEN}
       DRY_RUN: "true"
+      UI_USERNAME: ${UI_USERNAME}
       UI_PASSWORD: ${UI_PASSWORD}
       ARRS: >-
         [{"name":"sonarr","kind":"sonarr","url":"http://sonarr:8989","key":"${SONARR_KEY}"},
          {"name":"radarr","kind":"radarr","url":"http://radarr:7878","key":"${RADARR_KEY}"}]
 ```
 
-See [`docker-compose.yml`](docker-compose.yml) for a fuller example, and copy [`.env.example`](.env.example) to `.env` to hold your tokens and keys. Open `http://<host>:8080`, watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
+See [`docker-compose.yml`](docker-compose.yml) for a fuller example, and copy [`.env.example`](.env.example) to `.env` to hold your tokens and keys. Open `http://<host>:8080` (it has a light/dark/auto theme toggle), watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
 
 ## Configuration
 
@@ -58,18 +59,27 @@ Everything can be set with environment variables, in the web UI, or both. **A va
 | `POLL_SECONDS` | `60` | How often to check for new reports. |
 | `MAX_PER_DAY` | `20` | Maximum replacements per day. |
 | `UI_PORT` | `8080` | Web UI port. |
-| `UI_PASSWORD` | | HTTP basic auth for the UI (any username). **Set this.** The app holds your Plex token and can delete files. |
+| `UI_USERNAME` | | Username for the UI. If blank, any username is accepted (only the password is checked). Needs `UI_PASSWORD`. |
+| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** The app holds your Plex token and can delete files. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
-| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | qBittorrent details, used to move the replacement to the top of the queue. |
-| `SAB_URL`, `SAB_API_KEY` | | SABnzbd details, used for the same. |
+| `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
+| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | Default qBittorrent, for setups with one. Used when no `CLIENTS` entry matches. |
+| `SAB_URL`, `SAB_API_KEY` | | Default SABnzbd, for setups with one. |
 
 ### Why the qBittorrent and SABnzbd settings exist
 
-Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
+Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). With several qBittorrent or SABnzbd instances, list each in `CLIENTS` (or the **Download clients** table in the UI). Each queued replacement is matched to its client by the host and port Sonarr/Radarr use for it, falling back to the client's name, so the right instance is always the one that gets the call. For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
 
 ## How it matches a report to a file
 
 A report holds a Plex item reference. Reportarr asks Plex for that item's file name and IDs (TVDB for series, TMDB for movies), looks the item up in each Sonarr/Radarr instance of the right kind, and acts on the instance whose file name matches. If no instance owns the file, or the item is already gone from Plex, the report is logged as skipped.
+
+## Security
+
+- **Set `UI_PASSWORD`, and `UI_USERNAME` too.** The UI can change which servers Reportarr talks to, and the app holds your Plex token and the arr API keys. Without a password anyone who can reach the port can use it. Don't expose it to the internet; put it behind a reverse proxy with TLS if you need remote access (basic auth is sent in clear text over plain HTTP).
+- Secrets are never sent to the browser, and `/data/config.json` is written readable only by its owner.
+- Changes to settings must be sent as JSON from the same origin, which stops other websites from changing your settings through your browser.
+- The container runs as root so that existing `/data` volumes keep working. If you prefer, run it with `user: "1000:1000"` and make `./data` writable by that user.
 
 ## Limitations
 
@@ -78,6 +88,10 @@ A report holds a Plex item reference. Reportarr asks Plex for that item's file n
 - A replacement may be the same bad release again if Sonarr/Radarr don't match it to the blocklist entry. Check the Changes table after the first few real runs.
 - Only Sonarr and Radarr are supported (no Lidarr).
 - One bad report from one user deletes a file. That is the design, so mind who can report on your server and keep `MAX_PER_DAY` sensible.
+
+## Versions
+
+Each image build gets a version: `0.1.<run number>` for builds from `main`, or the tag for tagged releases (`v1.4.0` becomes `1.4.0`). It is shown in the web UI header, set as the image's `org.opencontainers.image.version` label, and added as an image tag next to `latest`. Bump the major.minor part with `VERSION_BASE` in `.github/workflows/docker.yml`.
 
 ## Development
 
