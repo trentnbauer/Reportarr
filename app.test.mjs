@@ -121,7 +121,9 @@ test('web server: auth, CSRF and size limits', async () => {
     assert.equal((await fetch(url + '/api/state', { headers: basic(S.wrong) })).status, 401);
     const ok = await fetch(url + '/api/state', { headers: basic(S.ui) });
     assert.equal(ok.status, 200);
-    assert.equal((await ok.json()).version, VERSION);
+    const okState = await ok.json();
+    assert.equal(okState.version, VERSION);
+    assert.equal(okState.authEnabled, true);
     assert.equal(ok.headers.get('x-frame-options'), 'DENY');
     assert.match(ok.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     // a cross-site form/fetch can send text/plain without a preflight: must be refused
@@ -162,6 +164,24 @@ test('version is shortened for commit hashes and defaults to dev', async () => {
     execFile(process.execPath, ['-e', "import('./app.mjs').then((m) => console.log(m.VERSION))"], { env: { ...process.env, APP_VERSION: v }, cwd: path.dirname(new URL(import.meta.url).pathname) }, (e, out) => res(out.trim()))));
   assert.equal(await run('0123456789abcdef0123456789abcdef01234567'), '0123456');
   assert.equal(await run('v1.2.3'), 'v1.2.3');
+});
+
+test('without UI_PASSWORD there is no login: the page just loads', async () => {
+  for (const env of [{}, { UI_USERNAME: '', UI_PASSWORD: '' }, { UI_USERNAME: 'admin' }]) { // a username alone does not switch auth on
+    delete process.env.UI_PASSWORD; delete process.env.UI_USERNAME; Object.assign(process.env, env); process.env.UI_PORT = '0';
+    const srv = serve(); await new Promise((r) => srv.once('listening', r));
+    const url = `http://127.0.0.1:${srv.address().port}`;
+    try {
+      const page = await fetch(url + '/');
+      assert.equal(page.status, 200, JSON.stringify(env));
+      assert.equal(page.headers.get('www-authenticate'), null);
+      const state = await (await fetch(url + '/api/state')).json();
+      assert.equal(state.authEnabled, false);
+    } finally { srv.close(); delete process.env.UI_USERNAME; }
+  }
+  process.env.UI_PASSWORD = S.ui; process.env.UI_PORT = '0';
+  const srv = serve(); await new Promise((r) => srv.once('listening', r));
+  try { assert.equal((await fetch(`http://127.0.0.1:${srv.address().port}/`)).status, 401); } finally { srv.close(); delete process.env.UI_PASSWORD; }
 });
 
 test('config file is private and the UI sends JSON', () => {

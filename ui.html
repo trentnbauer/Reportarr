@@ -15,6 +15,7 @@
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
   .muted { color:var(--muted); font-size:13px; }
   .badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .warn { border-color:var(--accent); margin:0 0 12px; }
   .error { color:var(--bad); } .ok { color:var(--ok); }
   .table { overflow-x:auto; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -38,6 +39,7 @@ try { const t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light'
 </head>
 <body>
 <div class="top"><h1>Reportarr <span class="badge" id="version"></span></h1><button type="button" class="ghost" id="theme" title="Switch between automatic, dark and light"></button></div>
+<p id="openwarn" class="card warn" hidden><strong>No login is set.</strong> Anyone who can reach this page can change settings, download your API keys and trigger deletions. Set <code>UI_USERNAME</code> and <code>UI_PASSWORD</code> to require one.</p>
 <div id="status" class="card"></div>
 
 <h2>Changes</h2>
@@ -91,6 +93,7 @@ let state, arrs = [], clients = [];
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function renderLog() {
+  document.getElementById('openwarn').hidden = state.authEnabled !== false;
   document.getElementById('version').textContent = state.version;
   const { config: c, status, changes } = state;
   document.getElementById('status').innerHTML =

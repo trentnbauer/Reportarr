@@ -63,8 +63,8 @@ Everything can be set with environment variables (the `.env` file), in the web U
 | `MAX_PER_DAY` | `20` | Maximum replacements per day. |
 | `WEB_UI` | `8080` | Host port for the web UI (compose). |
 | `UI_PORT` | `8080` | Web UI port inside the container. |
-| `UI_USERNAME` | | Username for the UI. If blank, any username is accepted (only the password is checked). Needs `UI_PASSWORD`. |
-| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** The app holds your Plex token and can delete files. |
+| `UI_USERNAME` | | Username for the UI. If blank, any username is accepted (only the password is checked). Has no effect without `UI_PASSWORD`. |
+| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** If it is blank there is no login at all: the page just loads, with a warning banner. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
 | `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
 | `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | Default qBittorrent, for setups with one. Used when no `CLIENTS` entry matches. |

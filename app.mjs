@@ -284,6 +284,7 @@ const MAX_BODY = 1_000_000;
 export function serve() {
   const html = fs.readFileSync(new URL('./ui.html', import.meta.url));
   const pass = process.env.UI_PASSWORD;
+  // no UI_PASSWORD means no login at all: the page just loads (a username on its own is not enough to turn auth on)
   if (!pass) log('UI_PASSWORD not set: the web UI is open to anyone who can reach it' + (process.env.UI_USERNAME ? ' (UI_USERNAME is ignored without a password)' : ''));
   const body = (req) => new Promise((res, rej) => {
     let d = '', big = false;
@@ -310,7 +311,7 @@ export function serve() {
     try {
       if (req.url === '/api/state') {
         return send(200, 'application/json', JSON.stringify({
-          config: publicConfig(), locked: lockedKeys(), status, version: VERSION, uiConfigured: hasFileConfig(),
+          config: publicConfig(), locked: lockedKeys(), status, version: VERSION, uiConfigured: hasFileConfig(), authEnabled: !!pass,
           changes: readJson(dataFile('changes.json'), []).reverse(),
         }));
       }
