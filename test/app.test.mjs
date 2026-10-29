@@ -55,25 +55,33 @@ const fakeQbit = (id, password) => listen(async (req, res) => {
   if (req.url === '/api/v2/torrents/topPrio' && req.headers.cookie === 'SID=x') { hits.push([id, new URLSearchParams(body).get('hashes')]); return res.end(); }
   res.writeHead(403).end();
 });
+// a qBittorrent that trusts this address: login answers 204 with no cookie and topPrio needs none
+const fakeQbitLan = (id) => listen(async (req, res) => {
+  let body = ''; for await (const d of req) body += d;
+  if (req.url === '/api/v2/auth/login') return res.writeHead(204).end();
+  if (req.url === '/api/v2/torrents/topPrio') { hits.push([id, new URLSearchParams(body).get('hashes')]); return res.end(); }
+  res.writeHead(404).end();
+});
 const fakeSab = (id, key) => listen((req, res) => {
   const u = new URL(req.url, 'http://x');
   if (u.searchParams.get('apikey') !== key) return res.writeHead(403).end();
   hits.push([id, u.searchParams.get('value')]); res.end('{"status":true}');
 });
-const servers = await Promise.all([fakeQbit('qbA', S.pwA), fakeQbit('qbB', S.pwB), fakeSab('sabA', S.keyA), fakeSab('sabB', S.keyB)]);
-const [pA, pB, sA, sB] = servers.map((s) => s.address().port);
+const servers = await Promise.all([fakeQbit('qbA', S.pwA), fakeQbit('qbB', S.pwB), fakeSab('sabA', S.keyA), fakeSab('sabB', S.keyB), fakeQbitLan('qbLan')]);
+const [pA, pB, sA, sB, pLan] = servers.map((s) => s.address().port);
 const mkClient = (name, impl, port) => ({ name, implementation: impl, fields: [
   { name: 'host', value: '127.0.0.1' }, { name: 'port', value: port }, { name: 'useSsl', value: false },
   { name: 'username', value: 'admin' }, { name: 'password', value: '********' }, { name: 'apiKey', value: '********' }] });
 const queue = [
   { episodeId: 1, downloadClient: 'qbA', downloadId: 'AAAA', title: 'one' }, { episodeId: 2, downloadClient: 'qbB', downloadId: 'BBBB', title: 'two' },
+  { episodeId: 5, downloadClient: 'qbLan', downloadId: 'LLLL', title: 'five' },
   { episodeId: 3, downloadClient: 'sabA', downloadId: 'nzo_a', title: 'three' }, { episodeId: 4, downloadClient: 'sabB', downloadId: 'nzo_b', title: 'four' },
 ];
 const fakeArr = await listen((req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.url.startsWith('/api/v3/queue')) return res.end(JSON.stringify({ records: queue }));
   if (req.url === '/api/v3/downloadclient') return res.end(JSON.stringify([
-    mkClient('qbA', 'QBittorrent', pA), mkClient('qbB', 'QBittorrent', pB), mkClient('sabA', 'Sabnzbd', sA), mkClient('sabB', 'Sabnzbd', sB)]));
+    mkClient('qbA', 'QBittorrent', pA), mkClient('qbB', 'QBittorrent', pB), mkClient('sabA', 'Sabnzbd', sA), mkClient('sabB', 'Sabnzbd', sB), mkClient('qbLan', 'QBittorrent', pLan)]));
   res.writeHead(404).end();
 });
 const arrCfg = { name: 'fake', url: `http://127.0.0.1:${fakeArr.address().port}`, key: 'k' };
@@ -96,6 +104,12 @@ test('falls back to the default client, and reports hidden secrets clearly', asy
   assert.deepEqual(hits, [['qbA', 'aaaa']]);
   await assert.rejects(prioritize(base, arrCfg, (r) => r.episodeId === 2, 't', 0), /hidden by the arr/);
   await assert.rejects(prioritize({ ...cfg, clients: [{ ...cfg.clients[1], password: S.wrong }] }, arrCfg, (r) => r.episodeId === 2, 't', 0), /login failed/);
+});
+
+test('a qBittorrent that trusts this address needs no password', async () => {
+  hits.length = 0;
+  await prioritize(base, arrCfg, (r) => r.episodeId === 5, 't', 0); // the arr hides the password and none is configured
+  assert.deepEqual(hits, [['qbLan', 'llll']]);
 });
 
 test('clientFor ignores clients of another kind or host', () => {

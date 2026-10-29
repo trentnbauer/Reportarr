@@ -228,6 +228,9 @@ const rel = (iso) => {
 };
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
+// Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
+const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : '');
+const retryBtn = (r) => (retryOf(r) && r.id && !r.retried ? `<button type="button" class="btn" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
 const statusKind = (r) => ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
 const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
 const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
@@ -294,7 +297,7 @@ function paintActivity() {
     const k = statusKind(r), label = STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1));
     return `<div class="item"><span class="st"><span class="status s-${k}"><i></i>${esc(label)}</span></span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
-      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</div>${r.retry && r.id && !r.retried ? `<button type="button" class="btn" data-retry="${esc(r.id)}">${r.retry === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : ''}</div>
+      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</div>${retryBtn(r)}</div>
       <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`;
   }).join('');
   $('empty').classList.toggle('hidden', rows.length > 0);
@@ -320,19 +323,20 @@ function paintLifecycle() {
       <span class="steps">${STEPS.map(([k, l]) => `<span class="${x.done[k] ? 'done' : ''}">${l}</span>`).join('')}</span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}</span></summary>
     <ol class="tl">${x.rows.map((r) => { const k = statusKind(r); return `<li><span class="tm">${esc(new Date(r.time).toLocaleString())}</span><span class="st"><span class="status s-${k}"><i></i>${esc(STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)))}</span></span>
-      <span class="tx">${r.title ? `<b>${esc(r.title)}</b> ` : ''}${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</span></li>`; }).join('')}</ol></details>`).join('')
+      <span class="tx">${r.title ? `<b>${esc(r.title)}</b> ` : ''}${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)} ${retryBtn(r)}</span></li>`; }).join('')}</ol></details>`).join('')
     || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
 }
 $('views').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; paintActivity(); } };
 $('lcq').oninput = (e) => { lcQuery = e.target.value; paintLifecycle(); };
 $('lifecycle').addEventListener('toggle', (e) => { const id = e.target.dataset?.id; if (id) e.target.open ? lcOpen.add(id) : lcOpen.delete(id); }, true);
-$('rows').onclick = async (e) => {
+const onRetry = async (e) => {
   const b = e.target.closest('[data-retry]'); if (!b) return;
   if (!state.config.dryRun && b.textContent === 'Retry' && !confirm('This runs the report again, which can delete and re-download its file. Continue?')) return;
   b.disabled = true; b.textContent = 'Retrying…';
   const r = await fetch(api('retry'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.retry }) }).catch(() => null);
   b.textContent = r?.ok ? 'Retrying · see table' : 'Failed to start';
 };
+$('rows').onclick = onRetry; $('lifecycle').addEventListener('click', onRetry);
 $('filters').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; paintActivity(); } };
 $('historicbtn').onclick = async () => {
   const n = state.status.historic;

@@ -232,17 +232,27 @@ async function act(c, s, r) {
 
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
 // redoing the report could delete the new download); any other failure runs the report again, through the daily cap.
+// Older versions saved a failed priority row without a retry field; its message gives it away.
+const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : undefined);
+
 async function retry(c, s, nodes, id) {
-  const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id);
-  if (!row?.retry || row.retried) return;
+  const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id), kind = row && retryKind(row);
+  if (!kind || row.retried) return;
   row.retried = true;
   writeJson(changesFile(), rows);
   const base = { reportId: row.reportId, source: row.source, title: row.title };
-  if (row.retry === 'priority') {
+  if (kind === 'priority') {
     const a = c.arrs.find((x) => x.name === row.instance);
     if (!a) return record({ status: 'error', ...base, detail: `retry: instance ${row.instance} is no longer configured` });
+    let match = row.match;
+    if (!match) { // saved before retries kept the match: find the download in the queue again by its title
+      const app = ARRS[a.kind], found = app.queueItem && (await arr(a, 'GET', `/queue?pageSize=200${app.queueQuery}`)).records.map((x) => app.queueItem(x)).find((x) => x?.title === row.title);
+      if (!found) return record({ status: 'skipped', ...base, instance: a.name, detail: 'retry: that download is no longer in the queue' });
+      match = found.match;
+    }
     record({ status: 'info', ...base, instance: a.name, detail: 'retrying queue priority' });
-    return prioritizeLater(c, a, row.match, row.title, base);
+    prioritizeLater(c, a, match, row.title, base); // in the background, like the first attempt: it waits for the queue
+    return;
   }
   const r = nodes.find((n) => n.id === row.reportId);
   if (!r) return record({ status: 'skipped', ...base, detail: 'retry: the report is no longer open' });
