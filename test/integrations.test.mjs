@@ -29,8 +29,9 @@ for (const [list, mods] of Object.entries(LISTS)) {
 test('an *arr app says how to find a reported file (or an issue) and how to replace it', () => {
   for (const m of Object.values(LISTS.arrs)) assert.ok(m.fromPlex || m.fromIssue, `${m.kind} can find something`);
   const plan = LISTS.arrs.sonarr.plan({ ep: { id: 7 } });
-  assert.deepEqual(Object.keys(plan).sort(), ['cmd', 'del', 'hist', 'match']);
+  assert.deepEqual(Object.keys(plan).sort(), ['check', 'cmd', 'del', 'hist', 'match']);
   assert.equal(plan.del(3), '/episodefile/3');
+  assert.equal(plan.check, '/episode/7');
   assert.deepEqual([LISTS.arrs.radarr.plan({ movie: { id: 1 } }).del(2), LISTS.arrs.lidarr.plan({ albumId: 9 }).del(2)], ['/moviefile/2', '/trackfile/2']);
 });
 

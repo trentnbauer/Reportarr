@@ -95,7 +95,7 @@
   .item .st { flex:0 0 118px; display:flex; }
   .status { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; }
   .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
-  .s-replaced { background:var(--okbg); color:var(--ok); } .s-dry { background:var(--accbg); color:var(--acctext); }
+  .s-replaced, .s-resolved { background:var(--okbg); color:var(--ok); } .s-replacing { background:var(--accbg); color:var(--acctext); } .s-dry { background:var(--accbg); color:var(--acctext); }
   .s-skipped, .s-other { background:var(--line2); color:var(--neutral); } .s-failed { background:var(--badbg); color:var(--bad); }
   .item .body { flex:1 1 260px; min-width:0; display:flex; flex-direction:column; gap:2px; }
   .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
@@ -220,8 +220,8 @@ const rel = (iso) => {
 };
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
-const statusKind = (r) => ({ replaced: 'replaced', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
-const STATUS_LABEL = { replaced: 'Replaced', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
+const statusKind = (r) => ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
+const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
 const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
 const failing = () => [
   ...state.config.sources.map((x) => ['sources', x.name]), ...state.config.arrs.map((x) => ['arrs', x.name]), ...state.config.clients.map((x) => ['clients', x.name]),
@@ -265,8 +265,9 @@ function paintActivity() {
   eb.classList.toggle('hidden', !(state.status.lastError || bad.length));
 
   const all = state.changes, counts = { all: all.length };
-  for (const k of ['replaced', 'dry', 'skipped', 'failed']) counts[k] = all.filter((r) => statusKind(r) === k).length;
-  $('filters').innerHTML = [['all', 'All'], ['replaced', 'Replaced'], ['dry', 'Dry run'], ['skipped', 'Skipped'], ['failed', 'Failed']]
+  for (const k of ['replaced', 'resolved', 'dry', 'skipped', 'failed']) counts[k] = all.filter((r) => statusKind(r) === k).length;
+  counts.replacing = state.status.replacing ?? 0; // issues waiting right now, not every row ever logged
+  $('filters').innerHTML = [['all', 'All'], ['replacing', 'Replacing'], ['replaced', 'Replaced'], ['resolved', 'Resolved'], ['dry', 'Dry run'], ['skipped', 'Skipped'], ['failed', 'Failed']]
     .map(([k, l]) => `<button type="button" data-filter="${k}" class="${filter === k ? 'on' : ''}">${l}<span>${counts[k]}</span></button>`).join('');
 
   const n = state.status.historic;
