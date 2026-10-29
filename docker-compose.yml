@@ -4,9 +4,9 @@ services:
   app:
     image: ghcr.io/trentnbauer/reportarr:latest
     restart: unless-stopped
-    ports: 
+    ports:
       - ${WEB_UI:-8080}:8080
-    volumes: 
+    volumes:
       - data:/data
     environment:
       PLEX_URL: ${PLEX_URL:-http://plex:32400}
@@ -20,11 +20,20 @@ services:
          {"name":"sonarr4k","kind":"sonarr","url":"http://sonarr4k:8989/s4k","key":"${SONARR4K_KEY}"},
          {"name":"radarr1080","kind":"radarr","url":"http://radarr1080:7878/radarr","key":"${RADARR1080_KEY}"},
          {"name":"radarr4k","kind":"radarr","url":"http://radarr4k:7878/r4k","key":"${RADARR4K_KEY}"}]
-      # Optional. By default qBittorrent/SABnzbd details are read from each Sonarr/Radarr's own download client settings.
-      # QBIT_URL: http://qbittorrent:8080
-      # QBIT_USERNAME: admin
-      # QBIT_PASSWORD: ${QBIT_PASSWORD}
-      # SAB_URL: http://sabnzbd:8080
-      # SAB_API_KEY: ${SAB_API_KEY}
+      # Optional, but needed to move the replacement to the top of the download queue: Sonarr/Radarr
+      # hide their download clients' passwords and API keys, so Reportarr can't borrow them.
+      # Leave blank to skip queue priority (the replacement still downloads). URL and username fall back
+      # to the host/username from each Sonarr/Radarr download client. Use SABnzbd's full API key, not the NZB key.
+      QBIT_URL: ${QBIT_URL:-}
+      QBIT_USERNAME: ${QBIT_USERNAME:-}
+      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
+      SAB_URL: ${SAB_URL:-}
+      SAB_API_KEY: ${SAB_API_KEY:-}
+    # The service names in PLEX_URL/ARRS only resolve if this stack shares a network with them. If Plex and the
+    # *arrs live in other compose projects, join their network (or use host IPs in the URLs above):
+    # networks: [media]
 volumes:
   data:
+# networks:
+#   media:
+#     external: true
