@@ -12,8 +12,8 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-'));
 process.env.POLL_SECONDS = '30'; // env-locked key
 const { VERSION } = await import('../src/util.mjs');
 const { ratingKeyOf, idsOf } = await import('../src/integrations/plex.mjs');
-const { clientFor, prioritize, pendingHistoric } = await import('../src/engine.mjs');
-const { serve, parseBase } = await import('../src/server.mjs');
+const { clientFor, prioritize, pendingHistoric, legacyBaseline } = await import('../src/engine.mjs');
+const { serve, parseBase, localHost } = await import('../src/server.mjs');
 const { getConfig, publicConfig, saveConfig, lockedKeys } = await import('../src/config.mjs');
 
 test('ratingKeyOf / idsOf parse Plex references', () => {
@@ -155,11 +155,18 @@ test('web server: auth, CSRF and size limits', async () => {
   } finally { srv2.close(); delete process.env.UI_PASSWORD; delete process.env.UI_USERNAME; }
 });
 
-test('historic reports are those seen but never acted on', () => {
+test('historic reports are the still-open ones in the baseline; old state files are migrated from the log once', () => {
   const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'new' }];
+  assert.deepEqual(pendingHistoric(nodes, ['a', 'c', 'gone']).map((n) => n.id), ['a', 'c']);
   const changes = [{ reportId: 'b', status: 'replaced' }, { status: 'info' }];
-  assert.deepEqual(pendingHistoric(nodes, ['a', 'b', 'c'], changes).map((n) => n.id), ['a', 'c']);
-  assert.deepEqual(pendingHistoric(nodes, ['a', 'b', 'c'], [{ reportId: 'a' }, { reportId: 'b' }, { reportId: 'c' }]), []);
+  assert.deepEqual(legacyBaseline(nodes, ['a', 'b', 'c'], changes), ['a', 'c']);
+});
+
+test('without a password, only IPs, LAN names and the BASE_URL host are answered (DNS rebinding)', () => {
+  const ok = (host, base) => localHost({ headers: { host } }, base);
+  for (const h of ['127.0.0.1:8080', '192.168.1.5', '[::1]:8080', 'localhost:8080', 'nas:8080', 'nas.local', 'media.lan', 'box.home.arpa']) assert.ok(ok(h), h);
+  for (const h of ['evil.example.com', 'rebind.attacker.net:8080', '', undefined]) assert.ok(!ok(h), String(h));
+  assert.ok(ok('media.example.com', 'media.example.com'));
 });
 
 test('version is shortened for commit hashes and defaults to dev', async () => {

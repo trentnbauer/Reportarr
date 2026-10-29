@@ -1,6 +1,6 @@
 // Overseerr / Seerr: a report source. Users report an issue on a title; Reportarr replaces its file(s) and then
 // comments on and resolves the issue. Everything specific to it lives here.
-import { trim, get, pass, fail, need, envNumbers } from '../util.mjs';
+import { trim, get, work, pass, fail, need, envNumbers } from '../util.mjs';
 
 // Overseerr names issue types by number
 const ISSUE_TYPE = { 1: 'video', 2: 'audio', 3: 'subtitles', 4: 'other' };
@@ -12,7 +12,7 @@ export const normalizeTypes = (v) => {
 };
 
 const api = async (src, method, p, body) => {
-  const r = await fetch(`${trim(src.url)}/api/v1${p}`, {
+  const r = await work(`${trim(src.url)}/api/v1${p}`, {
     method,
     headers: { 'X-Api-Key': src.key, 'Content-Type': 'application/json' },
     body: body && JSON.stringify(body),
@@ -85,8 +85,9 @@ const seerr = {
     }
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
-    for (const hit of hits) await ctx.swap(report, hit.title, hit);
-    if (c.dryRun || src.resolve === false) return;
+    let capped = false;
+    for (const hit of hits) if ((await ctx.swap(report, hit.title, hit)) === false) capped = true;
+    if (c.dryRun || src.resolve === false || capped) return; // capped: leave the issue open, not every file was replaced
     try {
       await api(src, 'POST', `/issue/${issue.id}/comment`, { message: `Reportarr replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}.` });
       await api(src, 'POST', `/issue/${issue.id}/resolved`);

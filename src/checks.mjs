@@ -7,7 +7,7 @@ const TARGETS = { source: 'sources', arr: 'arrs', client: 'clients' }; // what t
 
 // req is what the UI sends for one card: the values currently in the form. Blank secrets fall back to the saved ones by name.
 export async function runCheck(c, req = {}) {
-  const list = TARGETS[req.target], mod = list && LISTS[list][req.kind];
+  const list = TARGETS[req.target], mod = list && Object.hasOwn(LISTS[list], req.kind) && LISTS[list][req.kind];
   if (!mod) return fail('Unknown test');
   const stored = req.name ? c[list].find((x) => x.name === req.name) : undefined;
   try { return await mod.check(mod.checkArgs(req, stored)); } catch (e) { return fail(`${mod.kind}: ${why(e)}`); }

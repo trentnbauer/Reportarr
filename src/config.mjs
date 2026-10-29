@@ -3,7 +3,7 @@
 // its environment variables, saves its settings and exports them, and this file loops over them.
 import fs from 'node:fs';
 import path from 'node:path';
-import { trim } from './util.mjs';
+import { trim, writeFileAtomic } from './util.mjs';
 import { LISTS } from './integrations/index.mjs';
 
 export const DATA_DIR = process.env.DATA_DIR ?? '/data';
@@ -87,7 +87,7 @@ export function validate(patch) {
       if (seen.has(x.name)) throw new Error(`${WHAT[l]} name "${x.name}" is already used${envNames(l).includes(x.name) ? ' by one set in the environment' : ''}: pick another`);
       seen.add(x.name);
       const blankOk = l === 'clients' && x.default && !x.url; // a default client may leave the address to the *arr
-      if (!x.name || !LISTS[l][x.kind] || !(isUrl(x.url) || blankOk)) {
+      if (!x.name || !Object.hasOwn(LISTS[l], x.kind) || !(isUrl(x.url) || blankOk)) {
         throw new Error(`invalid ${WHAT[l]} "${x.name ?? ''}": needs a name, a kind (${Object.keys(LISTS[l]).join('|')}) and an http(s) url`);
       }
     }
@@ -116,7 +116,7 @@ export function saveConfig(patch) {
     if (patch[l]) cur[l] = patch[l].map((x) => normalizeEntry(l, x, (file[l] ?? []).find((o) => o.name === x.name)));
   }
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(cur, null, 2), { mode: 0o600 }); // holds API keys and passwords
+  writeFileAtomic(FILE, JSON.stringify(cur, null, 2), { mode: 0o600 }); // holds API keys and passwords
 }
 
 // ---- export: the effective settings as a .env file for docker compose, so UI-configured settings can be moved into the compose setup

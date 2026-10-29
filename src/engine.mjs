@@ -3,15 +3,16 @@
 // app and download client does for itself lives in src/integrations/.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { DATA_DIR, getConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
 import { SOURCES, ARRS, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request } from './integrations/arr.mjs';
-import { sleep, log } from './util.mjs';
+import { sleep, log, writeFileAtomic } from './util.mjs';
 
 const dataFile = (n) => path.join(DATA_DIR, n);
 export const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
-const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)); };
+const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); writeFileAtomic(f, JSON.stringify(v)); };
 export const stateFile = () => dataFile('state.json');
 export const changesFile = () => dataFile('changes.json');
 
@@ -25,7 +26,7 @@ let lastArrCheck = 0;
 // What the UI shows: one row per action the app took (or would take, in dry-run).
 export function record(entry) {
   const rows = readJson(changesFile(), []);
-  rows.push({ time: new Date().toISOString(), ...entry });
+  rows.push({ id: crypto.randomUUID(), time: new Date().toISOString(), ...entry });
   writeJson(changesFile(), rows.slice(-500));
   log(entry.status, entry.title ?? '', entry.instance ?? '', entry.detail ?? '');
 }
@@ -78,6 +79,7 @@ export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
     const q = (await arr(a, 'GET', '/queue?pageSize=200')).records.find(isOurs);
     if (!q) continue;
     const cl = (await arr(a, 'GET', '/downloadclient')).find((x) => x.name === q.downloadClient);
+    if (!cl) return record({ status: 'info', title, instance: a.name, detail: `download client "${q.downloadClient}" not found in ${a.name}; priority not set` });
     const mod = CLIENT_BY_IMPLEMENTATION[cl.implementation];
     if (!mod) return record({ status: 'info', title, instance: a.name, detail: `queue priority not supported for ${cl.implementation}` });
     const f = Object.fromEntries(cl.fields.map((x) => [x.name, x.value]));
@@ -92,56 +94,89 @@ export async function prioritize(c, a, isOurs, title, waitMs = 10_000) {
 const sourceOf = (r) => SOURCES[r.kind ?? 'plex'];
 const labelOf = (r) => sourceOf(r).reportLabel(r);
 
+// A queue item belongs to a replacement when it has the same episode, movie or album id (plan.match).
+const matches = (m) => (r) => Object.entries(m).every(([k, v]) => r[k] === v);
+// Push a replacement to the top of its download client in the background; a failure can be retried from the UI.
+const prioritizeLater = (c, a, match, title, base) => prioritize(c, a, matches(match), title)
+  .catch((e) => record({ status: 'error', ...base, title, instance: a.name, detail: 'priority failed: ' + e.message, retry: 'priority', match }));
+
+// The daily cap: s.count is how many items (an episode, a movie, an album) were really replaced today.
+const capFull = (c, s) => {
+  const today = new Date().toISOString().slice(0, 10);
+  if (s.day !== today) Object.assign(s, { day: today, count: 0 });
+  return s.count >= c.maxPerDay;
+};
+
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
-async function swap(c, report, title, hit) {
+// Returns false when the daily cap stopped it.
+async function swap(c, s, report, title, hit) {
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = ARRS[a.kind].plan(hit);
   const base = { reportId: report.id, source: labelOf(report), title, instance: a.name };
   const files = ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`;
   if (c.dryRun) return record({ status: 'dry-run', ...base, detail: `would delete ${files}, blocklist, search` });
+  if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `daily cap ${c.maxPerDay} reached: not replaced` }); return false; }
+  s.count++;
+  writeJson(stateFile(), s); // counted before deleting: a crash must not let the cap be exceeded
   const hist = await arr(a, 'GET', plan.hist);
   const grabbed = (hist.records ?? hist)[0];
   for (const id of ids) await arr(a, 'DELETE', plan.del(id));
   if (grabbed) await arr(a, 'POST', `/history/failed/${grabbed.id}`).catch((e) => record({ status: 'error', ...base, detail: 'blocklist failed: ' + e.message }));
   await arr(a, 'POST', '/command', plan.cmd);
   record({ status: 'replaced', ...base, detail: `deleted ${files}, blocklisted: ${!!grabbed}, search started` });
-  prioritize(c, a, plan.ours, title).catch((e) => record({ status: 'error', ...base, detail: 'priority failed: ' + e.message }));
+  prioritizeLater(c, a, plan.match, title, base);
 }
 
 // What a source's replace() is handed: the settings, the log, and the ways to find and replace files.
-const context = (c) => ({
+const context = (c, s) => ({
   c, record,
   locateFromPlex: (m, files, plexGet) => locateFromPlex(c, m, files, plexGet),
   locateIssue: (issue) => locateIssue(c, issue),
-  swap: (report, title, hit) => swap(c, report, title, hit),
+  swap: (report, title, hit) => swap(c, s, report, title, hit),
 });
 
 // Handle one report with the source it came from.
-export const handleReport = (c, report) => sourceOf(report).replace(context(c), report);
+export const handleReport = (c, report, s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [] }) => sourceOf(report).replace(context(c, s), report);
 
 // ---- the loop
-// Reports that existed before the app first ran: seen, but never acted on (no entry in the changes log).
-export const pendingHistoric = (nodes, seen, changes) => {
+// Reports that existed before the app first ran (s.baseline) and are still open: never acted on automatically.
+export const pendingHistoric = (nodes, baseline) => nodes.filter((n) => baseline.includes(n.id));
+// State files from before s.baseline: seen but with no row in the changes log. Only used once, to fill s.baseline.
+export const legacyBaseline = (nodes, seen, changes) => {
   const handled = new Set(changes.map((r) => r.reportId).filter(Boolean));
-  return nodes.filter((n) => seen.includes(n.id) && !handled.has(n.id));
+  return nodes.filter((n) => seen.includes(n.id) && !handled.has(n.id)).map((n) => n.id);
 };
 
 let historicRequested = false;
+const retries = [];
 let wake;
 export const requestHistoric = () => { historicRequested = true; wake?.(); };
+export const requestRetry = (id) => { retries.push(id); wake?.(); };
 
-// Runs one report through the daily cap and then handles it. Returns false when the cap is hit.
-async function act(c, s, r, { retryable = false } = {}) {
-  const today = new Date().toISOString().slice(0, 10);
-  if (s.day !== today) Object.assign(s, { day: today, count: 0 });
-  if (s.count >= c.maxPerDay) {
-    // a new report is marked handled so it is not retried forever; a historic one stays pending for the next click
-    if (!retryable) record({ status: 'skipped', reportId: r.id, source: labelOf(r), detail: `daily cap ${c.maxPerDay} reached` });
-    return false;
-  }
-  s.count++;
-  writeJson(stateFile(), s);
-  await handleReport(c, r).catch((e) => record({ status: 'error', reportId: r.id, source: labelOf(r), detail: e.message }));
+// Handles one report unless the daily cap is already full. Returns false when it is.
+async function act(c, s, r) {
+  if (capFull(c, s)) return false;
+  await handleReport(c, r, s).catch((e) => record({ status: 'error', reportId: r.id, source: labelOf(r), detail: e.message, retry: 'report' }));
   return true;
+}
+
+// The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
+// redoing the report could delete the new download); any other failure runs the report again, through the daily cap.
+async function retry(c, s, nodes, id) {
+  const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id);
+  if (!row?.retry || row.retried) return;
+  row.retried = true;
+  writeJson(changesFile(), rows);
+  const base = { reportId: row.reportId, source: row.source, title: row.title };
+  if (row.retry === 'priority') {
+    const a = c.arrs.find((x) => x.name === row.instance);
+    if (!a) return record({ status: 'error', ...base, detail: `retry: instance ${row.instance} is no longer configured` });
+    record({ status: 'info', ...base, instance: a.name, detail: 'retrying queue priority' });
+    return prioritizeLater(c, a, row.match, row.title, base);
+  }
+  const r = nodes.find((n) => n.id === row.reportId);
+  if (!r) return record({ status: 'skipped', ...base, detail: 'retry: the report is no longer open' });
+  record({ status: 'info', ...base, detail: 'retrying the report' });
+  if (!(await act(c, s, r))) record({ status: 'skipped', ...base, detail: `retry: daily cap ${c.maxPerDay} reached`, retry: 'report' });
 }
 
 // Fetch every configured source; one being down must not stop the others.
@@ -177,30 +212,42 @@ export async function poll() {
   const { nodes, ok, errors } = await fetchSources(c);
   await checkArrs(c);
   if (!ok.size) throw new Error(errors.join('; '));
-  const s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [] };
+  const s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [], baseline: [] };
   s.sources ??= ['plex']; // state files from before Overseerr support only ever saw Plex
+  s.baseline ??= legacyBaseline(nodes, s.seen, readJson(changesFile(), []));
   // a source seen for the first time (first run, or newly configured) is baselined: what it already holds is never acted on automatically
   for (const src of ok.values()) {
     if (s.sources.includes(src)) continue;
     const ids = nodes.filter((n) => n.source === src).map((n) => n.id);
-    s.seen.push(...ids); s.sources.push(src);
+    s.seen.push(...ids); s.baseline.push(...ids); s.sources.push(src);
     record({ status: 'info', detail: `baselined ${ids.length} existing ${src} report(s); only new ones will be acted on (use the button in the UI to action them)` });
   }
   writeJson(stateFile(), s);
-  for (const r of nodes.filter((n) => !s.seen.includes(n.id))) {
-    s.seen.push(r.id); // mark first: a crash must not retry a delete
+  const fresh = nodes.filter((n) => !s.seen.includes(n.id));
+  for (const [i, r] of fresh.entries()) {
+    // once the cap is full, new reports wait unseen and are handled when it resets, instead of being dropped
+    if (capFull(c, s)) {
+      if (s.capNoted !== s.day) { s.capNoted = s.day; record({ status: 'info', detail: `daily cap ${c.maxPerDay} reached; ${fresh.length - i} new report(s) wait until tomorrow` }); }
+      break;
+    }
+    s.seen.push(r.id);
+    writeJson(stateFile(), s); // mark first: a crash must not retry a delete
     await act(c, s, r);
     writeJson(stateFile(), s);
   }
   if (historicRequested) {
     historicRequested = false;
-    const todo = pendingHistoric(nodes, s.seen, readJson(changesFile(), []));
+    const todo = pendingHistoric(nodes, s.baseline);
     record({ status: 'info', detail: `actioning ${todo.length} historic report(s)${c.dryRun ? ' (dry run)' : ''}` });
     for (const r of todo) {
-      if (!(await act(c, s, r, { retryable: true }))) { record({ status: 'info', detail: 'daily cap reached; the remaining historic reports stay pending' }); break; }
+      if (!(await act(c, s, r))) { record({ status: 'info', detail: 'daily cap reached; the remaining historic reports stay pending' }); break; }
+      if (!c.dryRun) s.baseline = s.baseline.filter((id) => id !== r.id); // a dry run leaves it pending for the real run
+      writeJson(stateFile(), s);
     }
   }
-  status.historic = pendingHistoric(nodes, s.seen, readJson(changesFile(), [])).length;
+  for (const id of retries.splice(0)) await retry(c, s, nodes, id);
+  writeJson(stateFile(), s);
+  status.historic = pendingHistoric(nodes, s.baseline).length;
   return errors.join('; ');
 }
 

@@ -20,7 +20,8 @@ The report text is ignored on purpose: any report on a file means "replace this 
 
 - **Dry run is on by default.** Nothing is deleted until you set `DRY_RUN=false`.
 - **Existing reports are never acted on.** On first start, everything already reported is recorded as seen. Only reports created after that are handled.
-- A **daily cap** (`MAX_PER_DAY`, default 20) limits how much one bad day of reports can delete.
+- A **daily cap** (`MAX_PER_DAY`, default 20) limits how much one bad day of reports can delete. It counts each episode, movie or album really replaced (dry runs don't count), so an Overseerr issue on a 10-episode season uses 10. Reports that arrive once the cap is full wait and are handled the next day.
+- A failed row in the activity table has a **Retry** button. If only the queue-priority step failed, Retry redoes just that step, so it never deletes the new download.
 - Duplicate reports for the same file are handled once.
 - Plex can't close or delete reports, so Reportarr keeps its own record of handled ones in `/data/state.json`. Reports stay visible in Plex.
 
@@ -61,12 +62,12 @@ Everything can be set with environment variables (the `.env` file), in the web U
 | `OVERSEERR_RESOLVE`, `OVERSEERR_2_RESOLVE`, ... | `true` | Comment on and resolve the Overseerr issue after replacing. |
 | `DRY_RUN` | `true` | Log what would happen without deleting anything. |
 | `POLL_SECONDS` | `60` | How often to check for new reports. |
-| `MAX_PER_DAY` | `20` | Maximum replacements per day. |
+| `MAX_PER_DAY` | `20` | Maximum replacements per day: each episode, movie or album counts as one. |
 | `WEB_UI` | `8080` | Host port for the web UI (compose). |
 | `UI_PORT` | `8080` | Web UI port inside the container. |
 | `BASE_URL` | | For a reverse proxy that serves Reportarr under a path: `/reportarr`, or the full public URL `https://media.example.com/reportarr`. See below. |
 | `UI_USERNAME` | | Username for the UI. If blank, any username is accepted (only the password is checked). Has no effect without `UI_PASSWORD`. |
-| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** If it is blank there is no login at all: the page just loads, with a warning banner. |
+| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** If it is blank there is no login at all: the page just loads, with a warning banner, but only at an IP address or a LAN name (`nas`, `nas.local`, `.lan`, `.home.arpa`, `.internal`) or the host in `BASE_URL`, so a website can't reach it through DNS rebinding. |
 | `HIDE_LOGIN_WARNING` | `false` | Hide the "No login is set" banner in the web UI (also a switch under App settings). Only matters when `UI_PASSWORD` is not set. |
 | `DATA_DIR` | `/data` | Where state, config and the change log live. |
 | `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
