@@ -1,17 +1,19 @@
 # Every variable is optional: anything left out can be set in the web UI instead.
 # A variable set here is locked in the UI (env wins over the UI).
 services:
-  reportarr:
+  app:
     image: ghcr.io/trentnbauer/reportarr:latest
     restart: unless-stopped
-    ports: ["8080:8080"]
-    volumes: ["./data:/data"]
+    ports: 
+      - ${WEB_UI:-8080}:8080
+    volumes: 
+      - data:/data
     environment:
-      PLEX_URL: http://plex:32400
+      PLEX_URL: ${PLEX_URL:-http://plex:32400}
       PLEX_TOKEN: ${PLEX_TOKEN}
-      DRY_RUN: "true"            # set "false" to actually delete and re-download
-      POLL_SECONDS: "60"
-      MAX_PER_DAY: "20"
+      DRY_RUN: ${DRY_RUN:-true}            # set "false" to actually delete and re-download
+      POLL_SECONDS: ${POLL_SECONDS:-60}
+      MAX_PER_DAY: ${MAX_PER_DAY:-48}
       UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth, any username
       ARRS: >-
         [{"name":"sonarr1080","kind":"sonarr","url":"http://sonarr1080:8989/sonarr","key":"${SONARR1080_KEY}"},
@@ -24,3 +26,5 @@ services:
       # QBIT_PASSWORD: ${QBIT_PASSWORD}
       # SAB_URL: http://sabnzbd:8080
       # SAB_API_KEY: ${SAB_API_KEY}
+volumes:
+  data:
