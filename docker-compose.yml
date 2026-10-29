@@ -16,10 +16,18 @@ services:
       MAX_PER_DAY: ${MAX_PER_DAY:-48}
       UI_PASSWORD: ${UI_PASSWORD}  # HTTP basic auth, any username
       ARRS: >-
-        [{"name":"sonarr1080","kind":"sonarr","url":"http://sonarr1080:8989/sonarr","key":"${SONARR1080_KEY}"},
-         {"name":"sonarr4k","kind":"sonarr","url":"http://sonarr4k:8989/s4k","key":"${SONARR4K_KEY}"},
-         {"name":"radarr1080","kind":"radarr","url":"http://radarr1080:7878/radarr","key":"${RADARR1080_KEY}"},
-         {"name":"radarr4k","kind":"radarr","url":"http://radarr4k:7878/r4k","key":"${RADARR4K_KEY}"}]
+        [{
+          "name":"sonarr",
+          "kind":"sonarr",
+          "url":"${SONARR_URL}",
+          "key":"${SONARR_KEY}"
+        },
+         {
+         "name":"radarr",
+         "kind":"radarr",
+         "url":"${RADARR_URL}",
+         "key":"${RADARR_KEY}"
+        }]
       # Optional, but needed to move the replacement to the top of the download queue: Sonarr/Radarr
       # hide their download clients' passwords and API keys, so Reportarr can't borrow them.
       # Leave blank to skip queue priority (the replacement still downloads). URL and username fall back
