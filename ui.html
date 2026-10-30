@@ -119,7 +119,8 @@
   .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); }
   .s-replacing, .s-downloading, .s-downloaded, .s-dry { background:var(--accbg); color:var(--acctext); }
   .s-denied { background:var(--line2); color:var(--bad); }
-  .s-held { background:var(--accbg); color:var(--acctext); }
+  .s-held, .s-alert { background:var(--accbg); color:var(--acctext); }
+  .s-alertfail { background:var(--badbg); color:var(--bad); }
   .s-skipped, .s-other, .s-reported, .s-dismissed { background:var(--line2); color:var(--neutral); }
   .s-failed { background:var(--badbg); color:var(--bad); }
   .item .body { min-width:0; display:flex; flex-direction:column; gap:3px; }
@@ -309,8 +310,8 @@ const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<butt
 const retryBtn = (r) => (retryOf(r) && r.id && !r.retried && !r.dismissed ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
 // Versions before the lifecycle rows logged a resolved issue as an info row; it counts as resolved.
 const isResolved = (r) => r.status === 'resolved' || (r.status === 'info' && /commented and resolved$/.test(r.detail ?? ''));
-const statusKind = (r) => isResolved(r) ? 'resolved' : r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', denied: 'denied', held: 'held', error: 'failed' }[r.status] ?? 'other');
-const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', denied: 'Denied', held: 'Held', failed: 'Failed', dismissed: 'Dismissed' };
+const statusKind = (r) => isResolved(r) ? 'resolved' : r.status === 'alert' ? (r.failed ? 'alertfail' : 'alert') : r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', denied: 'denied', held: 'held', error: 'failed' }[r.status] ?? 'other');
+const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', denied: 'Denied', held: 'Held', alert: 'Alert', alertfail: 'Alert failed', failed: 'Failed', dismissed: 'Dismissed' };
 const labelOf = (r) => { const k = statusKind(r); return STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)); };
 const sourceText = (r) => r.source || (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
 const pill = (k, label) => `<span class="status s-${k}"><i></i>${esc(label)}</span>`;
@@ -357,8 +358,9 @@ function paintActivity() {
 
   const all = state.changes, counts = { all: all.length };
   for (const k of ['replaced', 'resolved', 'dry', 'skipped', 'denied', 'held', 'failed']) counts[k] = all.filter((r) => statusKind(r) === k).length;
+  counts.alert = all.filter((r) => r.status === 'alert').length; // sent or failed
   counts.replacing = state.status.replacing ?? 0; // issues waiting right now, not every row ever logged
-  $('filters').innerHTML = [['all', 'All'], ['replacing', 'Replacing'], ['replaced', 'Replaced'], ['resolved', 'Resolved'], ['dry', 'Dry run'], ['skipped', 'Skipped'], ['denied', 'Denied'], ['held', 'Held'], ['failed', 'Failed']]
+  $('filters').innerHTML = [['all', 'All'], ['replacing', 'Replacing'], ['replaced', 'Replaced'], ['resolved', 'Resolved'], ['dry', 'Dry run'], ['skipped', 'Skipped'], ['denied', 'Denied'], ['held', 'Held'], ['alert', 'Alerts'], ['failed', 'Failed']]
     .map(([k, l]) => `<button type="button" data-filter="${k}" class="${filter === k ? 'on' : ''}">${l}<span>${counts[k]}</span></button>`).join('');
 
   const nFailed = counts.failed;
@@ -379,7 +381,7 @@ function paintActivity() {
   const q = query.trim().toLowerCase();
   const done = hideDone ? new Set(lifecycles().filter(finished).map((x) => x.id)) : new Set(); // reports that are finished
   const match = (r) => !q || [r.title, sourceText(r), r.file, r.reportId, r.instance].join(' ').toLowerCase().includes(q);
-  const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter) && match(r) && !done.has(r.reportId));
+  const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter || (filter === 'alert' && r.status === 'alert')) && match(r) && !done.has(r.reportId));
   $('rows').innerHTML = rows.map((r) => `<div class="item"><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
       <div class="meta">${r.user ? `<code>${esc(r.user)}</code>` : ''}${r.instance ? `<code>${esc(r.instance)}</code>` : ''}${r.file ? `<code>${esc(r.file)}</code>` : ''}<span>${esc(r.detail)}${r.dismissed ? ` (${esc(DISMISSED[r.dismissed] ?? r.dismissed)})` : ''}</span></div>${retryBtn(r)}${dismissBtn(r)}${overrideBtn(r)}</div>

@@ -7,6 +7,10 @@ import { wants, clip } from './integrations/events.mjs';
 import { log, why } from './util.mjs';
 import { notificationHtml, reporterHtml } from './email.mjs';
 
+// The engine registers its logger here, so every alert sent (or that failed) shows in the log and in the report's own timeline.
+let logAlert = () => {};
+export const onAlert = (fn) => { logAlert = fn; };
+
 const WAIT_MS = 5000;
 const MAX_LINES = 20;
 const queue = new Map(); // event -> { items: [log rows], timer }
@@ -51,9 +55,20 @@ export async function flush(event) {
   queue.delete(event); clearTimeout(q.timer);
   const cfg = getConfig(), msg = { ...compose(event, q.items), server: cfg.serverName };
   msg.html = notificationHtml({ event, rows: q.items, server: cfg.serverName, dryRun: cfg.dryRun, subject: msg.title }); // only the email channels use it
-  await Promise.allSettled(getConfig().notifications
-    .filter((ch) => NOTIFIERS[ch.kind]?.isConfigured(ch) && wants(ch, event))
-    .map((ch) => NOTIFIERS[ch.kind].send(ch, msg).catch((e) => log('notification', ch.name, 'failed:', why(e)))));
+  const channels = cfg.notifications.filter((ch) => NOTIFIERS[ch.kind]?.isConfigured(ch) && wants(ch, event));
+  const results = await Promise.allSettled(channels.map((ch) => NOTIFIERS[ch.kind].send(ch, msg)));
+  const sent = [], failed = [];
+  results.forEach((r, k) => {
+    if (r.status === 'fulfilled') return sent.push(channels[k].name);
+    log('notification', channels[k].name, 'failed:', why(r.reason));
+    failed.push(`${channels[k].name}: ${why(r.reason)}`);
+  });
+  if (!sent.length && !failed.length) return;
+  // one row for each report the alert was about (a season is one report), so each report's timeline shows it; one row if it was about none
+  const detail = `${msg.title} alert ${sent.length ? `sent via ${sent.join(', ')}` : 'not sent'}${failed.length ? `; failed: ${failed.join('; ')}` : ''}`;
+  const byReport = new Map();
+  for (const r of q.items) if (r.reportId && !byReport.has(r.reportId)) byReport.set(r.reportId, r);
+  for (const r of byReport.size ? byReport.values() : [q.items[0]]) logAlert({ status: 'alert', reportId: r.reportId, source: r.source, title: r.title, user: r.user, detail, ...(failed.length ? { failed: true } : {}) });
 }
 export const flushAll = () => Promise.all([...queue.keys()].map(flush));
 
@@ -65,9 +80,15 @@ export function notifyReporter(r) {
     const msg = { event: 'reporter', server: getConfig().serverName, to: [r.reporterEmail], title: `${r.outcome}${r.title ? `: ${r.title}` : ''}`,
       lines: [`${r.outcome} - ${r.notice}`, ...(r.title ? [`About: ${r.title}`] : []), ...(r.link ? [`Your report: ${r.link}`] : [])] };
     msg.html = reporterHtml(r, { server: msg.server, subject: msg.title });
-    return Promise.allSettled(getConfig().notifications
-      .filter((ch) => ch.kind === 'smtp' && ch.toReporter === true && NOTIFIERS.smtp.isConfigured(ch))
-      .map((ch) => NOTIFIERS.smtp.send(ch, msg).catch((e) => log('notification', ch.name, 'failed to email the reporter:', why(e)))));
+    const channels = getConfig().notifications.filter((ch) => ch.kind === 'smtp' && ch.toReporter === true && NOTIFIERS.smtp.isConfigured(ch));
+    return Promise.allSettled(channels.map((ch) => NOTIFIERS.smtp.send(ch, msg))).then((results) => {
+      if (!channels.length) return;
+      const failed = [];
+      results.forEach((x, k) => { if (x.status === 'rejected') { log('notification', channels[k].name, 'failed to email the reporter:', why(x.reason)); failed.push(`${channels[k].name}: ${why(x.reason)}`); } });
+      // the log says who was told and what, never their address
+      logAlert({ status: 'alert', reportId: r.reportId, source: r.source, title: r.title, user: r.userName, ...(failed.length ? { failed: true } : {}),
+        detail: `Emailed the reporter${r.userName ? ` (${r.userName})` : ''}: ${r.outcome} - ${r.notice}${failed.length ? `; failed: ${failed.join('; ')}` : ''}` });
+    });
   } catch (e) { log('notification', 'reporter not emailed:', why(e)); return Promise.resolve(); }
 }
 

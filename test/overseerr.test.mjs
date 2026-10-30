@@ -278,6 +278,7 @@ test('a user over their daily limit is held, announced, and let through by Overr
     assert.equal(saved().pending.find((p) => p.ref === 72).backlog.length, 1);
     const note = changes().find((r) => r.userLimit && r.status === 'info');
     assert.match(note.detail, /alice reached their daily limit of 2/);
+    assert.equal(note.reportId, 'overseerr:72', 'it shows in that report\'s timeline');
     // the hourly limit: reached, then overridden from the UI for the rest of the hour
     seed({ count: 5 });
     assert.equal((await run(issue(73, tv, { problemSeason: 1, problemEpisode: 1 }), { ...base, maxPerHour: 5 })).filter((c) => c.startsWith('DELETE')).length, 0, 'the hour is used up');
