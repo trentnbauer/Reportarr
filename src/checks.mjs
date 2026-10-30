@@ -3,7 +3,7 @@
 import { LISTS } from './integrations/index.mjs';
 import { fail, why } from './util.mjs';
 
-const TARGETS = { source: 'sources', arr: 'arrs', client: 'clients' }; // what the UI calls a card -> the list it is in
+const TARGETS = { source: 'sources', arr: 'arrs', client: 'clients', notification: 'notifications' }; // what the UI calls a card -> the list it is in
 
 // req is what the UI sends for one card: the values currently in the form. Blank secrets fall back to the saved ones by name.
 export async function runCheck(c, req = {}) {

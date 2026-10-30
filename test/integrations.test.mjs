@@ -10,15 +10,16 @@ const NEEDS = {
   sources: ['envLines', 'legacy', 'normalize', 'isConfigured', 'fetch', 'label', 'replace'],
   arrs: ['api', 'appName', 'envLines', 'normalize', 'plan'],
   clients: ['implementation', 'prioritize', 'legacy'],
+  notifications: ['envLines', 'normalize', 'isConfigured', 'send', 'validate', 'switches'], // not an address, so no defaultUrl or url field
 };
 
 for (const [list, mods] of Object.entries(LISTS)) {
   for (const [kind, m] of Object.entries(mods)) {
     test(`${list}/${kind} declares what the core needs`, () => {
       assert.equal(m.kind, kind, 'registered under its own kind');
-      for (const k of [...COMMON, ...NEEDS[list]]) assert.ok(m[k] !== undefined, `${kind}.${k}`);
+      for (const k of [...COMMON.filter((k) => list !== 'notifications' || k !== 'defaultUrl'), ...NEEDS[list]]) assert.ok(m[k] !== undefined, `${kind}.${k}`);
       assert.ok(m.fields.every((f) => f.name && f.label), 'every field has a name and a label');
-      assert.ok(m.fields.some((f) => f.name === 'url'), 'a card always has a URL');
+      if (list !== 'notifications') assert.ok(m.fields.some((f) => f.name === 'url'), 'a card always has a URL');
       assert.equal(typeof m.fromEnv({}), 'object');
       assert.deepEqual(m.fromEnv({}), [], 'nothing configured means nothing returned');
       assert.ok(Array.isArray(m.fromEnv({})));
@@ -37,7 +38,8 @@ test('an *arr app says how to find a reported file (or an issue) and how to repl
 
 test('the UI is told every kind, with its label, fields and defaults, so it hard-codes no app names', () => {
   const meta = kindsMeta();
-  assert.deepEqual(Object.keys(meta), ['sources', 'arrs', 'clients']);
+  assert.deepEqual(Object.keys(meta), ['sources', 'arrs', 'clients', 'notifications']);
+  assert.deepEqual(Object.keys(meta.notifications), ['discord', 'smtp']);
   assert.deepEqual(Object.keys(meta.sources), ['plex', 'seerr']);
   assert.deepEqual(Object.keys(meta.arrs), ['sonarr', 'radarr', 'lidarr']);
   assert.deepEqual(Object.keys(meta.clients), ['qbittorrent', 'sabnzbd']);

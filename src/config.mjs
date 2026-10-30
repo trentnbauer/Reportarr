@@ -16,11 +16,12 @@ const DEFAULTS = {
   // [{name, kind, url, ...}]: report sources (Plex, Overseerr/Seerr), *arr instances, download clients.
   // Each entry's kind names an integration; what an entry holds is declared by that integration.
   sources: [], arrs: [], clients: [],
+  notifications: [], // Discord and email channels: where to tell people what happened
 };
 const LIST_NAMES = Object.keys(LISTS);
 const mods = (list) => Object.values(LISTS[list]);
 // secret fields per list: never sent to the browser, and kept when the UI sends them blank
-const SECRET_FIELDS = { sources: ['key'], arrs: ['key'], clients: ['password', 'apiKey'] };
+const SECRET_FIELDS = { sources: ['key'], arrs: ['key'], clients: ['password', 'apiKey'], notifications: ['webhook', 'password'] };
 
 // ---- the environment
 const fromEnvVars = {
@@ -29,6 +30,7 @@ const fromEnvVars = {
   arrs: () => [...(e.ARRS ? JSON.parse(e.ARRS) : []), ...mods('arrs').flatMap((m) => m.fromEnv(e))],
   // CLIENTS is a JSON list; the older single-client variables (QBIT_*, SAB_*) become one read-only default each
   clients: () => [...(e.CLIENTS ? JSON.parse(e.CLIENTS) : []), ...mods('clients').flatMap((m) => m.fromEnv(e))],
+  notifications: () => mods('notifications').flatMap((m) => m.fromEnv(e)),
 };
 const ENV = {
   pollSeconds: e.POLL_SECONDS && +e.POLL_SECONDS, maxPerDay: e.MAX_PER_DAY && +e.MAX_PER_DAY,
@@ -77,7 +79,7 @@ export function publicConfig() {
 }
 
 // ---- saving
-const WHAT = { sources: 'source', arrs: 'instance', clients: 'download client' };
+const WHAT = { sources: 'source', arrs: 'instance', clients: 'download client', notifications: 'notification channel' };
 const isUrl = (u) => /^https?:\/\//.test(u);
 
 export function validate(patch) {
@@ -86,8 +88,14 @@ export function validate(patch) {
     for (const x of patch[l] ?? []) {
       if (seen.has(x.name)) throw new Error(`${WHAT[l]} name "${x.name}" is already used${envNames(l).includes(x.name) ? ' by one set in the environment' : ''}: pick another`);
       seen.add(x.name);
+      const m = Object.hasOwn(LISTS[l], x.kind) && LISTS[l][x.kind];
+      if (m?.validate) { // a kind that is not an address (email) checks its own settings
+        const bad = x.name ? m.validate(x) : 'needs a name';
+        if (bad) throw new Error(`invalid ${WHAT[l]} "${x.name ?? ''}": ${bad}`);
+        continue;
+      }
       const blankOk = l === 'clients' && x.default && !x.url; // a default client may leave the address to the *arr
-      if (!x.name || !Object.hasOwn(LISTS[l], x.kind) || !(isUrl(x.url) || blankOk)) {
+      if (!x.name || !m || !(isUrl(x.url) || blankOk)) {
         throw new Error(`invalid ${WHAT[l]} "${x.name ?? ''}": needs a name, a kind (${Object.keys(LISTS[l]).join('|')}) and an http(s) url`);
       }
     }
@@ -128,7 +136,7 @@ const q = (v) => {
 export function envFile(c = getConfig()) {
   const L = ['# Reportarr settings, exported from the web UI. Contains secrets: keep it private and never commit it.', '# Save as .env next to docker-compose.yml.', ''];
   const add = (k, v) => L.push(`${k}=${q(v)}`);
-  for (const l of ['sources', 'arrs']) {
+  for (const l of ['sources', 'arrs', 'notifications']) {
     for (const m of mods(l)) {
       c[l].filter((x) => x.kind === m.kind).forEach((x, i) => { L.push('', `# ${x.name}`); for (const [k, v] of m.envLines(x, i + 1)) add(k, v); });
     }

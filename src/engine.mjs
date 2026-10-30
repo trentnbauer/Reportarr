@@ -9,6 +9,7 @@ import { runCheck } from './checks.mjs';
 import { SOURCES, ARRS, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
+import { notifyRow } from './notify.mjs';
 
 const dataFile = (n) => path.join(DATA_DIR, n);
 export const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -29,6 +30,7 @@ export function record(entry) {
   rows.push({ id: crypto.randomUUID(), time: new Date().toISOString(), ...entry });
   writeJson(changesFile(), rows.slice(-2000));
   log(entry.status, entry.title ?? '', entry.instance ?? '', entry.detail ?? '');
+  notifyRow(entry);
 }
 
 // How many replacements today out of the daily limit.
@@ -42,6 +44,7 @@ export const currentHealth = (c) => Object.fromEntries([
   ...c.sources.map((x) => [`source:${x.name}`, health[`source:${x.name}`]]),
   ...c.arrs.map((x) => [`arr:${x.name}`, health[`arr:${x.name}`]]),
   ...c.clients.map((x) => [`client:${x.name}`, health[`client:${x.name}`]]),
+  ...c.notifications.map((x) => [`notification:${x.name}`, health[`notification:${x.name}`]]),
 ].filter(([, v]) => v));
 
 // a call to a Sonarr/Radarr/Lidarr instance, on the API version its kind uses
@@ -337,10 +340,14 @@ export async function poll() {
   return errors.join('; ');
 }
 
+let lastNotified = null;
+
 // Poll forever; the UI's "action existing reports" button wakes it early.
 export async function run() {
   for (;;) {
     await poll().then((partial) => { status.lastError = partial || null; if (partial) log('poll error', partial); }, (e) => { status.lastError = e.message; log('poll error', e.message); });
+    if (status.lastError && status.lastError !== lastNotified) notifyRow({ status: 'error', source: 'Reportarr', detail: `Polling hit a problem: ${status.lastError}` }); // once per distinct problem, not every minute
+    lastNotified = status.lastError;
     status.lastPoll = new Date().toISOString();
     await new Promise((r) => { wake = r; setTimeout(r, getConfig().pollSeconds * 1000); });
   }
