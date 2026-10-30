@@ -22,14 +22,14 @@ const sonarr = {
     if (ep) return { a, ep, fileId: ep.episodeFile.id, file: fileName(ep.episodeFile.path) };
   },
 
-  // An Overseerr issue on a series: the reported episode, or every episode with a file in the reported season.
+  // An Overseerr issue on a series: the reported episode, every episode with a file in the reported season, or (no season) the whole series.
   async fromIssue({ a, issue }) {
     const { tmdbId, tvdbId, mediaType } = issue.media;
     if (mediaType !== 'tv') return [];
     const series = tvdbId ? (await call(a, 'GET', `/series?tvdbId=${tvdbId}`))[0] : (await call(a, 'GET', '/series')).find((x) => x.tmdbId === tmdbId);
     if (!series) return [];
     const eps = await call(a, 'GET', `/episode?seriesId=${series.id}&includeEpisodeFile=true`);
-    return eps.filter((e) => e.hasFile && e.seasonNumber === issue.problemSeason && (!issue.problemEpisode || e.episodeNumber === issue.problemEpisode))
+    return eps.filter((e) => e.hasFile && (!issue.problemSeason || e.seasonNumber === issue.problemSeason) && (!issue.problemEpisode || e.episodeNumber === issue.problemEpisode))
       .map((ep) => ({ a, ep, fileId: ep.episodeFile.id, file: fileName(ep.episodeFile.path), title: `${series.title} ${sxe(ep)}`,
       plex: { type: 'episode', title: series.title, tvdb: series.tvdbId, tmdb: series.tmdbId, season: ep.seasonNumber, episode: ep.episodeNumber } }));
   },
