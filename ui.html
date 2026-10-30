@@ -59,6 +59,7 @@
   .btn.add { height:32px; padding:0 13px; }
   .btn:disabled { opacity:.6; cursor:default; }
   .btn.danger { color:var(--bad); }
+  .btn.on { background:var(--accbg); color:var(--acctext); border-color:var(--accborder); }
 
   .warn { display:flex; gap:12px; align-items:flex-start; border:1px solid var(--accborder); background:var(--warnbg); border-radius:10px; padding:12px 14px; font-size:13.5px; }
   .warn b.i { flex:none; width:20px; height:20px; border-radius:50%; background:var(--accent); color:#fff; font-size:12px; display:grid; place-items:center; margin-top:1px; }
@@ -225,7 +226,7 @@
     <div class="errbanner row hidden" id="errbanner"></div>
     <section class="col" style="gap:12px">
       <div class="changes-head row"><h2>Changes</h2><div class="seg views" id="views"></div></div>
-      <div class="toolbar row"><div class="seg" id="filters"></div><button type="button" class="btn hidden" id="dismissall"></button><input type="search" id="q" class="search" placeholder="Search title, file or report ID"></div>
+      <div class="toolbar row"><div class="seg" id="filters"></div><button type="button" class="btn hidden" id="dismissall"></button><button type="button" class="btn" id="hidedone"></button><input type="search" id="q" class="search" placeholder="Search title, file or report ID"></div>
       <div class="callout row hidden" id="historic"><span id="historictext"></span><button type="button" class="btn" id="historicbtn"></button></div>
       <div id="lifecycle" class="col lcs hidden"></div>
       <div class="list" id="loglist"><div class="lhead"><span>Status</span><span>Item</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
@@ -263,6 +264,8 @@ applyTheme();
 let state = null;       // what the server last said
 let draft = null;       // the settings being edited (not saved until Save)
 let dirty = false, saveMsg = '', saveErr = false;
+let hideDone = false;
+try { hideDone = localStorage.getItem('hideDone') === '1'; } catch {}
 let tab = 'activity', filter = 'all', view = 'log', query = '', lcOpen = new Set(), uid = 0;
 const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
 const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients'], ['notify', 'Notifications']];
@@ -293,7 +296,9 @@ const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^prior
 const DISMISSED = { fixed: 'fixed later', retried: 'retried', expired: 'expired after 7 days', manual: 'dismissed' };
 const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<button type="button" class="btn sm" data-dismiss="${esc(r.id)}" title="Stop counting this as a failure">Dismiss</button>` : '');
 const retryBtn = (r) => (retryOf(r) && r.id && !r.retried && !r.dismissed ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
-const statusKind = (r) => r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
+// Versions before the lifecycle rows logged a resolved issue as an info row; it counts as resolved.
+const isResolved = (r) => r.status === 'resolved' || (r.status === 'info' && /commented and resolved$/.test(r.detail ?? ''));
+const statusKind = (r) => isResolved(r) ? 'resolved' : r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
 const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed', dismissed: 'Dismissed' };
 const labelOf = (r) => { const k = statusKind(r); return STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)); };
 const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
@@ -358,10 +363,12 @@ function paintActivity() {
   $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
   $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
   $('lifecycle').classList.toggle('hidden', view !== 'report');
+  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed';
   if (view === 'report') { paintLifecycle(); return; }
   const q = query.trim().toLowerCase();
+  const done = hideDone ? new Set(lifecycles().filter((x) => x.kind === 'resolved').map((x) => x.id)) : new Set(); // reports that are finished
   const match = (r) => !q || [r.title, sourceText(r), r.file, r.reportId, r.instance].join(' ').toLowerCase().includes(q);
-  const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter) && match(r));
+  const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter) && match(r) && !done.has(r.reportId));
   $('rows').innerHTML = rows.map((r) => `<div class="item"><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
       <div class="meta">${r.instance ? `<code>${esc(r.instance)}</code>` : ''}${r.file ? `<code>${esc(r.file)}</code>` : ''}<span>${esc(r.detail)}${r.dismissed ? ` (${esc(DISMISSED[r.dismissed] ?? r.dismissed)})` : ''}</span></div>${retryBtn(r)}${dismissBtn(r)}</div>
@@ -379,7 +386,7 @@ function lifecycles() {
   const g = new Map();
   for (const r of [...state.changes].reverse()) if (r.reportId) { if (!g.has(r.reportId)) g.set(r.reportId, []); g.get(r.reportId).push(r); }
   return [...g].map(([id, rows]) => {
-    const has = (s) => rows.some((r) => r.status === s), uniq = (k) => [...new Set(rows.map((r) => r[k]).filter(Boolean))];
+    const has = (s) => rows.some((r) => (s === 'resolved' ? isResolved(r) : r.status === s)), uniq = (k) => [...new Set(rows.map((r) => r[k]).filter(Boolean))];
     const done = Object.fromEntries(STEPS.map(([k]) => [k, has(k)]));
     const live = rows.filter((r) => !cosmetic(r));
     const kind = has('resolved') ? 'resolved' : live.length ? lifecycleKind((s) => live.some((r) => r.status === s), live.at(-1).status) : rows.some((r) => r.status === 'error' && !r.dismissed) ? 'failed' : 'dismissed';
@@ -388,13 +395,13 @@ function lifecycles() {
 }
 function paintLifecycle() {
   const q = query.trim().toLowerCase();
-  const list = lifecycles().filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
+  const list = lifecycles().filter((x) => !(hideDone && x.kind === 'resolved')).filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
   $('lifecycle').innerHTML = list.map((x) => {
-    const n = STEPS.filter(([k]) => x.done[k]).length;
+    const full = x.kind === 'resolved', n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
     return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
       <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
       <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span></span>
-      <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
+      <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${full || x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
     <ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <span class="tx">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}${retryBtn(r)}${dismissBtn(r)}</span></li>`).join('')}</ol></details>`;
@@ -405,6 +412,7 @@ $('q').oninput = (e) => { query = e.target.value; paintActivity(); };
 $('lifecycle').addEventListener('toggle', (e) => { const id = e.target.dataset?.id; if (id) e.target.open ? lcOpen.add(id) : lcOpen.delete(id); }, true);
 const dismiss = async (id) => { await fetch(api('dismiss'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null); await refresh(); };
 $('dismissall').onclick = () => dismiss('all');
+$('hidedone').onclick = () => { hideDone = !hideDone; try { localStorage.setItem('hideDone', hideDone ? '1' : '0'); } catch {} paintActivity(); };
 const onRetry = async (e) => {
   const d = e.target.closest('[data-dismiss]'); if (d) { e.preventDefault(); d.disabled = true; return dismiss(d.dataset.dismiss); }
   const b = e.target.closest('[data-retry]'); if (!b) return;
