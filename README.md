@@ -71,6 +71,7 @@ Everything can be set with environment variables (the `.env` file), in the web U
 | `DRY_RUN` | `true` | Log what would happen without deleting anything. |
 | `POLL_SECONDS` | `60` | How often to check for new reports. |
 | `MAX_PER_USER_PER_DAY` | `5` | Maximum replacements per person per day (the local day), for Overseerr/Seerr issues, counted the same way. `0` turns it off. A person over their limit has their reports **held** until tomorrow, or until you press Override. Plex reports name no user, so only the hourly limit applies to them. |
+| `SERVER_NAME` | | A name for this server (for example `latte`), shown on the emails Reportarr sends: in the subject (`[Reportarr - latte] ...`) and the sign-off ("Reportarr (automated system) on latte"), so you can tell servers apart. Also under App settings. |
 | `MAX_PER_HOUR` | `10` | Maximum replacements per hour: each episode, movie or album counts as one. When it is reached Reportarr pauses and carries on when the hour turns over. |
 | `WEB_UI` | `8080` | Host port for the web UI (compose). |
 | `UI_PORT` | `8080` | Web UI port inside the container. |

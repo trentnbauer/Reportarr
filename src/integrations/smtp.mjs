@@ -145,14 +145,14 @@ const smtp = {
   }),
   isConfigured: (s) => !!(s.host && ADDRESS.test(s.from ?? '') && addresses(s.to).length),
 
-  // msg is { event, title, lines }
+  // msg is { event, title, lines, to?, server? }: server is the SERVER_NAME setting, shown so you can tell servers apart
   send: (ch, msg) => sendMail({ ...ch, to: msg.to ?? addresses(ch.to), // a message can name its own recipient: the reporter
-    subject: `[Reportarr] ${msg.title}`, text: `${msg.lines.join('\n')}\n\n— ${SIGN_OFF}\n` }),
+    subject: `[Reportarr${msg.server ? ` - ${msg.server}` : ''}] ${msg.title}`, text: `${msg.lines.join('\n')}\n\n— ${SIGN_OFF}${msg.server ? ` on ${msg.server}` : ''}\n` }),
 
   checkArgs: (req, stored) => ({ host: req.host, port: req.port, username: req.username, password: req.password || stored?.password || '', from: req.from, to: req.to, tls: req.tls !== false }),
-  async check(ch) {
+  async check(ch, { server } = {}) {
     if (!smtp.isConfigured(ch)) return fail('Set a host, a From address and at least one To address first');
-    await smtp.send(ch, { event: 'test', title: 'Test message', lines: ['Reportarr can send email through this server.'] });
+    await smtp.send(ch, { event: 'test', title: 'Test message', lines: ['Reportarr can send email through this server.'], server });
     return pass('Test email sent');
   },
 };

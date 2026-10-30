@@ -256,6 +256,35 @@ test('logging a completed report emails the reporter, and keeps their address ou
   saveConfig({ notifications: [] });
 });
 
+test('SERVER_NAME is shown in the subject and the sign-off of every email, including the Test and reporter emails; nothing changes without one', async () => {
+  const sent = async () => bodyOf(mails.at(-1));
+  mails.length = 0;
+  await smtp.send(SMTP, { event: 'replaced', title: 'Replaced', lines: ['x'] });
+  assert.match((await sent()).head, /Subject: \[Reportarr\] Replaced/);
+  assert.doesNotMatch((await sent()).text, / on latte/);
+  await smtp.send(SMTP, { event: 'replaced', title: 'Replaced', lines: ['x'], server: 'latte' });
+  assert.match((await sent()).head, /Subject: \[Reportarr - latte\] Replaced/);
+  assert.match((await sent()).text, /— Reportarr \(automated system\) on latte/);
+  // the Test button: the name comes from the settings
+  saveConfig({ serverName: 'latte', notifications: [SMTP] });
+  mails.length = 0;
+  assert.equal((await runCheck(getConfig(), { target: 'notification', kind: 'smtp', name: 'email-1', host: SMTP.host, port: SMTP.port, username: 'me', password: '', from: SMTP.from, to: SMTP.to, tls: false })).ok, true);
+  assert.match((await sent()).head, /Subject: \[Reportarr - latte\] Test message/);
+  // the reporter email
+  saveConfig({ notifications: [{ ...SMTP, toReporter: true }] });
+  mails.length = 0;
+  await notifyReporter({ reporterEmail: 'bob@example.com', outcome: 'Denied', notice: 'n' });
+  assert.match((await sent()).head, /Subject: \[Reportarr - latte\] Denied/);
+  assert.match((await sent()).text, /on latte/);
+  // the setting: saved, exported, validated
+  assert.equal(getConfig().serverName, 'latte');
+  assert.match(envFile(), /^SERVER_NAME=latte$/m);
+  assert.equal(publicConfig().serverName, 'latte');
+  assert.throws(() => saveConfig({ serverName: 'a\nb' }), /one line of at most 60/);
+  assert.throws(() => saveConfig({ serverName: 'x'.repeat(61) }), /one line of at most 60/);
+  saveConfig({ serverName: '', notifications: [] });
+});
+
 test('"Email the reporter" is off by default, comes from SMTP_TO_REPORTER, and is exported', () => {
   assert.equal(smtp.fromEnv({ SMTP_HOST: 'h' })[0].toReporter, false);
   assert.equal(smtp.fromEnv({ SMTP_HOST: 'h', SMTP_TO_REPORTER: 'true' })[0].toReporter, true);

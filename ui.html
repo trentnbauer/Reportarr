@@ -288,7 +288,7 @@ const locked = (k) => state.locked.includes(k);
 
 function newDraft() {
   const c = state.config;
-  draft = { pollSeconds: c.pollSeconds, maxPerHour: c.maxPerHour, maxPerUserPerDay: c.maxPerUserPerDay, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
+  draft = { pollSeconds: c.pollSeconds, maxPerHour: c.maxPerHour, maxPerUserPerDay: c.maxPerUserPerDay, serverName: c.serverName, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
   for (const l of LISTS) draft[l] = c[l].map((x) => ({ ...x, _id: ++uid }));
 }
 const find = (list, id) => draft[list].find((x) => x._id === +id);
@@ -508,6 +508,7 @@ function renderPanel() {
         ${field('Poll interval (seconds)', 'number', draft.pollSeconds, { attrs: 'data-top="pollSeconds" min="10"', dis: locked('pollSeconds'), env: locked('pollSeconds') })}
         ${field('Max replacements per hour', 'number', draft.maxPerHour, { attrs: 'data-top="maxPerHour" min="0"', dis: locked('maxPerHour'), env: locked('maxPerHour') })}
         ${field('Max replacements per user per day', 'number', draft.maxPerUserPerDay, { attrs: 'data-top="maxPerUserPerDay" min="0"', dis: locked('maxPerUserPerDay'), env: locked('maxPerUserPerDay'), hint: 'Per Overseerr/Seerr reporter; 0 is no limit. Plex reports name no user, so only the hourly limit applies to them.' })}
+        ${field('Server name', 'text', draft.serverName, { attrs: 'data-top="serverName" maxlength="60"', dis: locked('serverName'), env: locked('serverName'), hint: 'Shown on emails, so you can tell servers apart. Optional.' })}
       </div>
       <div class="switches tiles">
         ${switchBtn('data-flip="dryRun"', draft.dryRun, 'Dry run', 'Log only, never delete', locked('dryRun'))}
@@ -606,7 +607,7 @@ function refreshCard(list, x) { // only the result and dot, so unsaved typing is
 $('save').onclick = async () => {
   const strip = ({ _id, isNew, keySet, passwordSet, apiKeySet, webhookSet, fromEnv, ...rest }) => rest;
   const patch = Object.fromEntries(LISTS.map((l) => [l, draft[l].filter((x) => !x.fromEnv).map(strip)]));
-  for (const k of ['pollSeconds', 'maxPerHour', 'maxPerUserPerDay', 'dryRun', 'hideLoginWarning']) if (!locked(k)) patch[k] = draft[k];
+  for (const k of ['pollSeconds', 'maxPerHour', 'maxPerUserPerDay', 'serverName', 'dryRun', 'hideLoginWarning']) if (!locked(k)) patch[k] = draft[k];
   $('save').disabled = true;
   try {
     const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
