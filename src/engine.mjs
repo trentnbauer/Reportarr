@@ -17,7 +17,7 @@ const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); write
 export const stateFile = () => dataFile('state.json');
 export const changesFile = () => dataFile('changes.json');
 
-export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [], backlog: [], open: [] };
+export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [], backlog: [], open: null }; // open: the Seerr issues open as of the last poll; null until Seerr has been read
 // Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
 // *arr instances every few minutes, download clients and Bazarr gently (see checkLogins). Notification channels only when you press Test: it sends a message.
 export const health = {};
@@ -203,6 +203,7 @@ const context = (c, s) => ({
   allowance: (report) => allowance(c, s, report),
   userRoom: (report) => userRoom(c, s, report),
   // Not now: forget that the report was seen, so a later poll handles it again once it may (the row is logged once a day per report).
+  forget: (report) => { s.seen = s.seen.filter((id) => id !== report.id); writeJson(stateFile(), s); }, // handled again from scratch by the next poll
   hold: (report, detail) => {
     s.seen = s.seen.filter((id) => id !== report.id);
     const day = dayKey();
@@ -340,6 +341,22 @@ export function dismissFailures(id) {
   return n;
 }
 
+// Open issues that Reportarr itself skipped are tidied (closed with a note) by their source; each is tried once a day, a few per poll.
+// A report still being worked on (pending, or held by a limit) is left alone.
+async function tidyOpen(c, s, nodes) {
+  if (c.dryRun) return;
+  const rows = readJson(changesFile(), []);
+  let n = 0;
+  for (const r of nodes) {
+    if (n >= 10) break;
+    if (!SOURCES[r.kind]?.tidy || !s.seen.includes(r.id) || (s.pending ?? []).some((p) => p.reportId === r.id)) continue;
+    const last = rows.findLast((x) => x.reportId === r.id && ['skipped', 'denied', 'held', 'replaced', 'replacing', 'resolved'].includes(x.status));
+    if (!last || last.status !== 'skipped' || (s.tidied ??= {})[r.id] === dayKey()) continue;
+    s.tidied[r.id] = dayKey();
+    try { if (await SOURCES[r.kind].tidy(context(c, s), r, last)) n++; } catch (e) { record({ status: 'error', reportId: r.id, detail: `could not tidy it: ${e.message}` }); }
+  }
+}
+
 // ---- the loop
 // Reports that existed before the app first ran (s.baseline) and are still open: never acted on automatically.
 export const pendingHistoric = (nodes, baseline) => nodes.filter((n) => baseline.includes(n.id));
@@ -368,7 +385,7 @@ async function act(c, s, r) {
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
 // redoing the report could delete the new download); any other failure runs the report again, through the hourly limit.
 // Older versions saved a failed priority row without a retry field; its message gives it away.
-const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)|no Sonarr\/Radarr instance has a file/.test(r.detail ?? '') ? 'report' : undefined);
+const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)|no Sonarr\/Radarr instance has a file(?!.*closed it)/.test(r.detail ?? '') ? 'report' : undefined);
 
 async function retry(c, s, nodes, id) {
   const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id), kind = row && retryKind(row);
@@ -493,6 +510,7 @@ export async function poll() {
     }
   }
   for (const id of retries.splice(0)) await retry(c, s, nodes, id);
+  await tidyOpen(c, s, nodes);
   await checkPending(c, s);
   status.replacing = s.pending.length;
   status.backlog = s.pending.filter((p) => p.backlog?.length).map((p) => ({ reportId: p.reportId, count: p.backlog.length }));

@@ -30,8 +30,15 @@ const userOf = (issue, src) => {
 
 // What the reporter is told when their report is completed: the outcome and the reason (the log keeps these; the address is only used to
 // email them, and never in a dry run).
+const SERIES_NOTE = "A report against the whole series can't be replaced automatically. Please report the particular episode that has the problem (open it and choose Report an issue there) and it will be replaced.";
+const NO_FILE_NOTE = 'No file was found for this title, so there is nothing for Reportarr to replace. If the title should be in the library, please ask the server owner.';
+// Close an issue with a (signed) note: the comment, then resolve it. If either fails the error is thrown and the issue stays open.
+const close = async (src, issue, note) => {
+  await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed(note) });
+  await api(src, 'POST', `/issue/${issue.id}/resolved`);
+};
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
-const tell = (c, report, outcome, notice) => ({ outcome, notice, link: `${trim(report.src.url)}/issues/${report.issue.id}`, userName: report.user?.name, issueType: cap(ISSUE_TYPE[report.issue.issueType]), reportedAt: report.issue.createdAt, ...(report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
+const tell = (c, report, outcome, notice, email = true) => ({ outcome, notice, link: `${trim(report.src.url)}/issues/${report.issue.id}`, userName: report.user?.name, issueType: cap(ISSUE_TYPE[report.issue.issueType]), reportedAt: report.issue.createdAt, ...(email && report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
 
 const seerr = {
   kind: 'seerr', label: 'Overseerr / Seerr', prefix: 'seerr', defaultUrl: 'http://overseerr:5055',
@@ -102,8 +109,7 @@ const seerr = {
       let closed = false;
       if (!c.dryRun && src.resolve !== false) {
         try {
-          await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed("A report against the whole series can't be replaced automatically. Please report the particular episode that has the problem (open it and choose Report an issue there) and it will be replaced.") });
-          await api(src, 'POST', `/issue/${issue.id}/resolved`);
+          await close(src, issue, SERIES_NOTE);
           closed = true;
         } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); }
       }
@@ -113,7 +119,14 @@ const seerr = {
     // Over their daily limit: held until tomorrow (the report is looked at again each poll), or until someone presses Override.
     if (!c.dryRun && ctx.userRoom(report) <= 0) return ctx.hold(report, `${report.user.name} has reached their daily limit of ${c.maxPerUserPerDay}: ${what} is held until tomorrow, or press Override`);
     const hits = await ctx.locateIssue(issue);
-    if (!hits.length) return record({ status: 'skipped', retry: 'report', ...base, ...tell(c, report, 'Skipped', 'No file was found for this title, so there was nothing to replace.'), detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
+    if (!hits.length) {
+      let closed = false; // like the whole-series case: left open in a dry run, or when resolving issues is off
+      if (!c.dryRun && src.resolve !== false) {
+        try { await close(src, issue, NO_FILE_NOTE); closed = true; } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); }
+      }
+      return record({ status: 'skipped', ...(closed ? {} : { retry: 'report' }), ...base, ...tell(c, report, 'Skipped', 'No file was found for this title, so there was nothing to replace.'),
+        detail: `${what}: no Sonarr/Radarr instance has a file for this title${closed ? '; closed it' : ''}` });
+    }
     if (subs) for (const h of hits) h.op = 'subtitles';
     // As many files as this hour's limit allows now; the rest wait in the report's backlog and carry on as the limit resets.
     const room = c.dryRun ? hits.length : ctx.allowance(report);
@@ -137,6 +150,24 @@ const seerr = {
       ctx.watch(report, items, later);
       record({ status: 'replacing', ...base, detail: subs ? `${what}: subtitles refreshed${later.length ? `, ${later.length} more as the hourly limit allows` : ''}` : `${what}: waiting for ${items.length} replacement file(s)${later.length ? ` and ${later.length} more to replace as the hourly limit allows` : ''} before resolving` });
     }
+  },
+
+  // Tidying up: an issue still open in Seerr that Reportarr skipped (an older version, or before this one closed them) is closed with the
+  // note now. Whole-series ones only when "Replace whole series" is off (on, a Retry would replace the series instead). A "no file" one is
+  // first looked for again: if the library has it by now it is handled normally instead. No email goes to the reporter for these.
+  // Returns true when it closed one.
+  async tidy(ctx, report, last) {
+    const { c, record } = ctx, { src, issue } = report;
+    if (c.dryRun || src.resolve === false || last.status !== 'skipped') return false;
+    const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${issue.id}`, base = { reportId: report.id, source: seerr.reportLabel(report) };
+    const noFile = /no Sonarr\/Radarr instance has a file for this title$/.test(last.detail ?? '');
+    const series = /reported against the whole series(?!; closed)/.test(last.detail ?? '') && src.wholeSeries === false;
+    if (!noFile && !series) return false;
+    if (noFile && (await ctx.locateIssue(issue)).length) { ctx.forget(report); return false; }
+    try { await close(src, issue, series ? SERIES_NOTE : NO_FILE_NOTE); } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); return false; }
+    record({ status: series ? 'denied' : 'skipped', ...base, ...tell(c, report, series ? 'Denied' : 'Skipped', series ? 'Series report. Report a season or 1 file.' : 'No file was found for this title, so there was nothing to replace.', false),
+      detail: `${what}: ${series ? 'reported against the whole series' : 'no Sonarr/Radarr instance has a file for this title'}; closed it` });
+    return true;
   },
 
   // Called by the engine when every replacement file is back.
