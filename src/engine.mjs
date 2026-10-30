@@ -17,7 +17,7 @@ const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); write
 export const stateFile = () => dataFile('state.json');
 export const changesFile = () => dataFile('changes.json');
 
-export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [], backlog: [] };
+export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [], backlog: [], open: [] };
 // Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
 // *arr instances every few minutes, download clients and Bazarr gently (see checkLogins). Notification channels only when you press Test: it sends a message.
 export const health = {};
@@ -368,7 +368,7 @@ async function act(c, s, r) {
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
 // redoing the report could delete the new download); any other failure runs the report again, through the hourly limit.
 // Older versions saved a failed priority row without a retry field; its message gives it away.
-const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)/.test(r.detail ?? '') ? 'report' : undefined);
+const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)|no Sonarr\/Radarr instance has a file/.test(r.detail ?? '') ? 'report' : undefined);
 
 async function retry(c, s, nodes, id) {
   const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id), kind = row && retryKind(row);
@@ -444,6 +444,8 @@ export async function poll() {
     throw new Error('not configured: add a Plex or Overseerr/Seerr source (with its token or key) and at least one Sonarr, Radarr or Lidarr instance');
   }
   const { nodes, ok, errors } = await fetchSources(c);
+  // The Seerr issues that are open as of this poll: a report Reportarr skipped or denied is only really done once its issue is closed.
+  if (c.sources.some((x) => x.kind === 'seerr' && ok.has(x.name))) status.open = nodes.filter((n) => n.kind === 'seerr').map((n) => n.id);
   await checkArrs(c);
   await checkLogins(c);
   if (!ok.size) throw new Error(errors.join('; '));
