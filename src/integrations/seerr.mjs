@@ -94,7 +94,7 @@ const seerr = {
           closed = true;
         } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); }
       }
-      return record({ status: 'skipped', ...base, ...(closed ? {} : { retry: 'report' }),
+      return record({ status: closed ? 'denied' : 'skipped', ...base, ...(closed ? {} : { retry: 'report' }),
         detail: closed ? `${what}: reported against the whole series; closed it and asked for the particular episode` : `${what}: reported against the whole series ("Replace whole series" is off)` });
     }
     const hits = await ctx.locateIssue(issue);

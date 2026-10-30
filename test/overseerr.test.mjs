@@ -147,9 +147,11 @@ test('with whole series off, the issue is closed with a note asking for the part
   assert.match(lastComment, /— Reportarr \(automated system\)$/);
   const row = changes().at(-1);
   assert.match(row.detail, /closed it and asked for the particular episode/);
+  assert.equal(row.status, 'denied', 'refused and the reporter told: Denied, not just skipped');
   assert.equal(row.retry, undefined, 'the issue is closed, so there is nothing to retry');
   assert.deepEqual(await run(issue(41, tv), { ...off, dryRun: true }), [], 'a dry run does not touch Seerr');
   assert.equal(changes().at(-1).retry, 'report');
+  assert.equal(changes().at(-1).status, 'skipped', 'nothing was told to the reporter, so it is only skipped');
 });
 
 test('a report naming no season replaces every episode with a file, in every season', async () => {
