@@ -98,10 +98,10 @@ test('today\'s count and the limit are reported, and the count resets on a new d
   const stateFile = path.join(process.env.DATA_DIR, 'state.json');
   const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const usage = async () => { const { resetsAt, ...u } = await get(); assert.ok(Date.parse(resetsAt) > Date.now() && Date.parse(resetsAt) - Date.now() <= 3600_000, 'it restarts within the hour'); return u; };
-  assert.deepEqual(await usage(), { count: st.count, max: 10 });
+  assert.deepEqual(await usage(), { count: st.count, max: 10, overridden: false });
   assert.equal(st.count, 0, 'the dry runs above do not use up the hourly limit');
   fs.writeFileSync(stateFile, JSON.stringify({ ...st, hour: '2000-01-01T00', count: 99 }));
-  assert.deepEqual(await usage(), { count: 0, max: 10 });
+  assert.deepEqual(await usage(), { count: 0, max: 10, overridden: false });
   s.close();
 });
 

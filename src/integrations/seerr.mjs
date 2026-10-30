@@ -22,6 +22,12 @@ const api = async (src, method, p, body) => {
   return text ? JSON.parse(text) : null;
 };
 
+// Who made an issue: the key counts their replacements, the name is what people see.
+const userOf = (issue, src) => {
+  const u = issue.createdBy;
+  return u?.id ? { key: `${src.name}:${u.id}`, name: u.displayName || u.plexUsername || u.username || u.email || `user ${u.id}` } : undefined;
+};
+
 const seerr = {
   kind: 'seerr', label: 'Overseerr / Seerr', prefix: 'seerr', defaultUrl: 'http://overseerr:5055',
   fields: [
@@ -70,7 +76,7 @@ const seerr = {
   // The first instance (a source named "overseerr") keeps the original id format, so existing state and logs stay valid.
   async fetch(src) {
     return (await api(src, 'GET', '/issue?take=100&filter=open&sort=added')).results
-      .map((issue) => ({ id: src.name === 'overseerr' ? `overseerr:${issue.id}` : `overseerr:${src.name}:${issue.id}`, date: issue.createdAt, kind: 'seerr', source: src.name, src, issue }));
+      .map((issue) => ({ id: src.name === 'overseerr' ? `overseerr:${issue.id}` : `overseerr:${src.name}:${issue.id}`, date: issue.createdAt, kind: 'seerr', source: src.name, src, issue, user: userOf(issue, src) }));
   },
   reportLabel: (r) => `${r.src?.name === 'overseerr' ? 'Overseerr' : r.src?.name} issue #${r.issue.id} · ${ISSUE_TYPE[r.issue.issueType] ?? 'other'}`,
 
@@ -99,11 +105,13 @@ const seerr = {
       return record({ status: 'denied', ...base, ...(closed ? {} : { retry: 'report' }),
         detail: closed ? `${what}: reported against the whole series; closed it and asked for the particular episode` : `${what}: reported against the whole series ("Replace whole series" is off)` });
     }
+    // Over their daily limit: held until tomorrow (the report is looked at again each poll), or until someone presses Override.
+    if (!c.dryRun && ctx.userRoom(report) <= 0) return ctx.hold(report, `${report.user.name} has reached their daily limit of ${c.maxPerUserPerDay}: ${what} is held until tomorrow, or press Override`);
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
     if (subs) for (const h of hits) h.op = 'subtitles';
     // As many files as this hour's limit allows now; the rest wait in the report's backlog and carry on as the limit resets.
-    const room = c.dryRun ? hits.length : ctx.allowance();
+    const room = c.dryRun ? hits.length : ctx.allowance(report);
     const later = [], items = [];
     for (const [i, hit] of hits.entries()) { if (i >= room) { later.push(hit); continue; } const done = await ctx.swap(report, hit.title, hit); if (done === false) later.push(hit); else if (done) items.push(done); }
     if (c.dryRun || (!items.length && !later.length) || (src.resolve === false && !later.length)) return; // nothing was done, or nothing to tell Seerr

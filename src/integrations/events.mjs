@@ -5,6 +5,7 @@ export const EVENTS = [
   { name: 'onFailed', event: 'failed', label: 'Failures', hint: 'When a report or connection fails' },
   { name: 'onResolved', event: 'resolved', label: 'Resolved', hint: 'When the new file is in Plex' },
   { name: 'onCap', event: 'cap', label: 'Hourly limit reached', hint: 'When MAX_PER_HOUR is hit' },
+  { name: 'onUserLimit', event: 'userlimit', label: 'User limit reached', hint: 'When someone reaches their daily limit' },
 ];
 export const eventSwitches = EVENTS.map(({ name, label, hint }) => ({ name, label, hint }));
 export const wants = (channel, event) => channel[EVENTS.find((x) => x.event === event).name] !== false;

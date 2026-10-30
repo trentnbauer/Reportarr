@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 const rnd = () => randomBytes(8).toString('hex'); // generated per run so the repo holds no secret-looking literals
 const KEY = rnd();
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-os-'));
-const { handleReport: replaceIssue, poll, requestRetry, status } = await import('../src/engine.mjs');
+const { handleReport: replaceIssue, poll, requestRetry, requestOverride, limitUsage, status } = await import('../src/engine.mjs');
 const { saveConfig } = await import('../src/config.mjs');
 
 const calls = [];
@@ -75,7 +75,7 @@ const base = { dryRun: false, clients: [], sources: [SRC],
 const movie = { tmdbId: 603, tvdbId: null, mediaType: 'movie' };
 const tv = { tmdbId: 1399, tvdbId: 81189, mediaType: 'tv' };
 const issue = (id, media, extra = {}) => ({ id, issueType: 1, status: 1, problemSeason: 0, problemEpisode: 0, media, createdAt: '2026-10-29T00:00:00Z', ...extra });
-const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, kind: 'seerr', source: 'overseerr', src: cfg.sources[0], issue: i }); return calls.filter((c) => !c.includes('GET')); };
+const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, kind: 'seerr', source: 'overseerr', src: cfg.sources[0], issue: i, user: i.createdBy && { key: `overseerr:${i.createdBy.id}`, name: i.createdBy.plexUsername } }); return calls.filter((c) => !c.includes('GET')); };
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
 
 test('a movie issue deletes the file, blocklists, searches, then comments but does not resolve yet', async () => {
@@ -222,6 +222,46 @@ test('a report bigger than this hour\'s limit carries on as the limit resets, an
     imported = true; calls.length = 0; await poll();
     assert.ok(calls.includes('POST overseerr /api/v1/issue/31/resolved'));
   } finally { imported = false; fs.writeFileSync(sf, before); saveConfig({ maxPerHour: 1000 }); }
+});
+
+test('a user over their daily limit is held, announced, and let through by Override; the hourly limit can be overridden too', async () => {
+  const sf = path.join(process.env.DATA_DIR, 'state.json'), before = fs.readFileSync(sf, 'utf8'), hour = new Date().toISOString().slice(0, 13), day = new Date().toLocaleDateString('en-CA');
+  const saved = () => JSON.parse(fs.readFileSync(sf, 'utf8'));
+  const seed = (o = {}) => fs.writeFileSync(sf, JSON.stringify({ seen: ['overseerr:70'], hour, count: 0, sources: ['overseerr'], baseline: [], pending: [], users: {}, ...o }));
+  const alice = { id: 7, plexUsername: 'alice' }, cfg = { ...base, maxPerUserPerDay: 2 };
+  const mine = (id, extra = {}) => issue(id, tv, { problemSeason: 1, problemEpisode: 1, createdBy: alice, ...extra });
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs, maxPerHour: 1000, maxPerUserPerDay: 2 });
+  issues = [];
+  try {
+    seed({ users: { 'overseerr:7': { day, count: 2 } } });
+    assert.deepEqual(await run(mine(70), cfg), [], 'alice is at her limit: nothing is deleted and Seerr is not touched');
+    const held = changes().at(-1);
+    assert.deepEqual([held.status, held.user, held.userLimit, held.reportId], ['held', 'alice', true, 'overseerr:70']);
+    assert.match(held.detail, /alice has reached their daily limit of 2/);
+    assert.deepEqual(saved().seen, [], 'it is looked at again on a later poll');
+    await run(mine(70), cfg);
+    assert.equal(changes().filter((r) => r.reportId === 'overseerr:70' && r.status === 'held').length, 1, 'logged once a day, not every poll');
+    assert.equal((await run(issue(71, tv, { problemSeason: 1, problemEpisode: 1, createdBy: { id: 8, plexUsername: 'bob' } }), cfg)).filter((c) => c.startsWith('DELETE')).length, 1, 'bob is not affected');
+    // Override: applied by the next poll, marks the held row, and lets the report through
+    requestOverride({ report: 'overseerr:70' });
+    await poll();
+    assert.deepEqual(saved().overrides, ['overseerr:70']);
+    assert.equal(changes().find((r) => r.status === 'held' && r.reportId === 'overseerr:70').overridden, true);
+    assert.equal((await run(mine(70), cfg)).filter((c) => c.startsWith('DELETE')).length, 1, 'overridden, it goes');
+    // reaching the limit while replacing: the rest waits, and it is announced
+    seed({ users: { 'overseerr:7': { day, count: 1 } } });
+    const w = (await run(mine(72, { problemEpisode: 0 }), cfg)).filter((c) => c.startsWith('DELETE'));
+    assert.equal(w.length, 1, 'one left of her two: the second episode of the season waits');
+    assert.equal(saved().pending.find((p) => p.ref === 72).backlog.length, 1);
+    const note = changes().find((r) => r.userLimit && r.status === 'info');
+    assert.match(note.detail, /alice reached their daily limit of 2/);
+    // the hourly limit: reached, then overridden from the UI for the rest of the hour
+    seed({ count: 5 });
+    assert.equal((await run(issue(73, tv, { problemSeason: 1, problemEpisode: 1 }), { ...base, maxPerHour: 5 })).filter((c) => c.startsWith('DELETE')).length, 0, 'the hour is used up');
+    requestOverride({ global: true }); await poll();
+    assert.equal(limitUsage({ maxPerHour: 5 }).overridden, true);
+    assert.equal((await run(issue(74, tv, { problemSeason: 1, problemEpisode: 1 }), { ...base, maxPerHour: 5 })).filter((c) => c.startsWith('DELETE')).length, 1, 'overridden, it goes');
+  } finally { fs.writeFileSync(sf, before); saveConfig({ maxPerHour: 1000, maxPerUserPerDay: 0 }); }
 });
 
 test('every step of a replacement is logged against the report and the file, and the comment is signed', async () => {
