@@ -147,6 +147,14 @@
   .lc .when { text-align:right; font-size:12.5px; color:var(--muted); }
   .chev { display:inline-block; margin-left:4px; transition:transform .15s; }
   .lc[open] .chev { transform:rotate(90deg); }
+  .dl { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+  .dlbar { flex:none; width:140px; height:5px; border-radius:99px; background:var(--track); overflow:hidden; }
+  .dlbar i { display:block; height:100%; background:var(--accent); border-radius:99px; }
+  .dlbar.full i { background:var(--ok); }
+  .dls { margin:0; padding:10px 16px; list-style:none; display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--line2); background:var(--card); font-size:13px; }
+  .dls li { display:grid; grid-template-columns:minmax(0, 1fr) 140px 150px; gap:4px 14px; align-items:center; }
+  .dls li > span:first-child { min-width:0; word-break:break-word; }
+  .dls .tx { color:var(--muted); font-size:12px; }
   .tl { margin:0; padding:4px 16px 12px; list-style:none; display:flex; flex-direction:column; border-top:1px solid var(--line2); background:var(--card); }
   .tl li { display:grid; grid-template-columns:150px 112px minmax(0, 1fr); gap:4px 14px; align-items:center; padding:8px 0; font-size:13px; border-bottom:1px solid var(--line2); }
   .tl li:last-child { border-bottom:0; }
@@ -206,7 +214,7 @@
     .lhead, .item, .lc > summary { grid-template-columns:122px minmax(0, 1fr); }
     .lhead span:last-child { display:none; }
     .item .when, .lc .when, .lc .prog { grid-column:2; text-align:left; align-items:flex-start; }
-    .tl li { grid-template-columns:minmax(0, 1fr); }
+    .tl li, .dls li { grid-template-columns:minmax(0, 1fr); }
   }
 </style>
 </head>
@@ -393,17 +401,30 @@ function lifecycles() {
     return { id, rows, done, kind, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
   }).sort((a, b) => b.time.localeCompare(a.time));
 }
+// Download progress for a report, from what the server read off the *arr queue on its last poll.
+const fmtEta = (ms) => { const rem = ms - Date.now(); if (rem <= 0) return 'finishing'; const m = Math.round(rem / 60000); return rem < 60000 ? '< 1 min left' : m < 60 ? `~${m} min left` : `~${Math.floor(m / 60)} h ${m % 60} min left`; };
+const dlOf = (id) => { const all = (state.status.downloads ?? []).filter((d) => d.reportId === id); return all.some((d) => d.state || d.stage !== 'replaced') ? all : []; }; // only once something is queued
+const bar = (pct) => `<span class="dlbar ${pct >= 100 ? 'full' : ''}"><i style="width:${pct}%"></i></span>`;
+const etaText = (d) => (d.pct >= 100 ? (d.stage === 'downloading' || d.stage === 'downloaded' ? 'waiting for import' : 'imported') : d.eta ? fmtEta(Date.parse(d.eta)) : d.state ? d.state.charAt(0).toUpperCase() + d.state.slice(1) : 'waiting for a release');
+function dlSummary(dl) {
+  if (!dl.length) return '';
+  const pct = Math.round(dl.reduce((s, d) => s + d.pct, 0) / dl.length), etas = dl.filter((d) => d.pct < 100 && d.eta).map((d) => Date.parse(d.eta)).filter(Number.isFinite);
+  return `<span class="dl">${bar(pct)}${pct}%${etas.length ? ` · ${fmtEta(Math.max(...etas))}` : ''}${dl.length > 1 ? ` · ${dl.filter((d) => d.pct >= 100).length} of ${dl.length} done` : ''}</span>`;
+}
+function dlList(dl) {
+  return dl.length ? `<ul class="dls">${dl.map((d) => `<li><span>${esc(d.title)}${d.release ? ` <span class="tx">${esc(d.release)}</span>` : ''}</span>${bar(d.pct)}<span class="tx">${d.pct}% · ${esc(etaText(d))}</span></li>`).join('')}</ul>` : '';
+}
 function paintLifecycle() {
   const q = query.trim().toLowerCase();
   const list = lifecycles().filter((x) => !(hideDone && x.kind === 'resolved')).filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
   $('lifecycle').innerHTML = list.map((x) => {
-    const full = x.kind === 'resolved', n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
+    const full = x.kind === 'resolved', dl = full ? [] : dlOf(x.id), n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
     return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
       <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
-      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span></span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${dlSummary(dl)}</span>
       <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${full || x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
-    <ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
+    ${dlList(dl)}<ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <span class="tx">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}${retryBtn(r)}${dismissBtn(r)}</span></li>`).join('')}</ol></details>`;
   }).join('') || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
 }

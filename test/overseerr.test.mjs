@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 const rnd = () => randomBytes(8).toString('hex'); // generated per run so the repo holds no secret-looking literals
 const KEY = rnd();
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-os-'));
-const { handleReport: replaceIssue, poll, requestRetry } = await import('../src/engine.mjs');
+const { handleReport: replaceIssue, poll, requestRetry, status } = await import('../src/engine.mjs');
 const { saveConfig } = await import('../src/config.mjs');
 
 const calls = [];
@@ -146,15 +146,20 @@ test('every step of a replacement is logged against the report and the file, and
   assert.match(lastComment, /\n\n— Reportarr \(automated system\)$/);
   const rows = () => changes().filter((r) => r.reportId === 'overseerr:12').map((r) => r.status);
   assert.deepEqual(rows(), ['reported', 'replaced', 'replacing']);
-  queueRecords = [{ episodeId: 13, status: 'downloading', size: 10, sizeleft: 4, title: 'Show.S02E01.1080p' }];
+  queueRecords = [{ episodeId: 13, status: 'downloading', size: 10, sizeleft: 4, timeleft: '00:05:00', title: 'Show.S02E01.1080p' }];
   await poll();
   assert.equal(rows().at(-1), 'downloading');
+  const dl = status.downloads.find((d) => d.reportId === 'overseerr:12');
+  assert.deepEqual([dl.pct, dl.stage, dl.release], [60, 'downloading', 'Show.S02E01.1080p']);
+  assert.ok(Math.abs(Date.parse(dl.eta) - Date.now() - 300_000) < 5000, 'the ETA is five minutes from now');
   queueRecords = [{ episodeId: 13, status: 'completed', size: 10, sizeleft: 0, title: 'Show.S02E01.1080p' }];
   await poll();
   assert.equal(rows().at(-1), 'downloaded');
+  assert.equal(status.downloads.find((d) => d.reportId === 'overseerr:12').pct, 100);
   imported = true; queueRecords = [];
   await poll();
   assert.deepEqual(rows().slice(-2), ['imported', 'resolved']);
+  assert.ok(!status.downloads.some((d) => d.reportId === 'overseerr:12'), 'nothing left to show once it is resolved');
   const done = changes().find((r) => r.reportId === 'overseerr:12' && r.status === 'imported');
   assert.equal(done.file, 'Show - S02E01 new.mkv');
   assert.equal(changes().find((r) => r.reportId === 'overseerr:12' && r.status === 'replaced').file, undefined, 'mock episode file has no path');
