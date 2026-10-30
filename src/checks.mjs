@@ -10,5 +10,5 @@ export async function runCheck(c, req = {}) {
   const list = TARGETS[req.target], mod = list && Object.hasOwn(LISTS[list], req.kind) && LISTS[list][req.kind];
   if (!mod) return fail('Unknown test');
   const stored = req.name ? c[list].find((x) => x.name === req.name) : undefined;
-  try { return await mod.check(mod.checkArgs(req, stored), { server: c.serverName }); } catch (e) { return fail(`${mod.kind}: ${why(e)}`); }
+  try { return await mod.check(mod.checkArgs(req, stored), { server: c.serverName, dryRun: c.dryRun }); } catch (e) { return fail(`${mod.kind}: ${why(e)}`); }
 }

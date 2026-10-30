@@ -30,7 +30,8 @@ const userOf = (issue, src) => {
 
 // What the reporter is told when their report is completed: the outcome and the reason (the log keeps these; the address is only used to
 // email them, and never in a dry run).
-const tell = (c, report, outcome, notice) => ({ outcome, notice, link: `${trim(report.src.url)}/issues/${report.issue.id}`, ...(report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
+const tell = (c, report, outcome, notice) => ({ outcome, notice, link: `${trim(report.src.url)}/issues/${report.issue.id}`, userName: report.user?.name, issueType: cap(ISSUE_TYPE[report.issue.issueType]), reportedAt: report.issue.createdAt, ...(report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
 
 const seerr = {
   kind: 'seerr', label: 'Overseerr / Seerr', prefix: 'seerr', defaultUrl: 'http://overseerr:5055',
@@ -145,6 +146,7 @@ const seerr = {
     await api(src, 'POST', `/issue/${p.ref}/resolved`);
     const titles = p.items.map((i) => i.title).filter(Boolean);
     record({ status: 'resolved', reportId: p.reportId, source: p.source, ...(titles.length ? { title: titles[0] + (titles.length > 1 ? ` and ${titles.length - 1} more` : '') } : {}), detail: `${what}: replacement imported, resolved`,
+      userName: p.user?.name, issueType: cap(ISSUE_TYPE[p.issueType]), reportedAt: p.reportedAt,
       outcome: 'Resolved', notice: p.issueType === 3 ? 'The subtitles were refreshed.' : 'The file was replaced and the new one is ready.', link: `${trim(src.url)}/issues/${p.ref}`,
       ...(p.user?.email && !c.dryRun ? { reporterEmail: p.user.email } : {}) });
   },

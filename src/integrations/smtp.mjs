@@ -4,6 +4,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
 import { TIMEOUT_MS, pass, fail, SIGN_OFF } from '../util.mjs';
+import { notificationHtml } from '../email.mjs';
 import { eventSwitches, flagsOf, eventFlags, eventsLine, envIndexes } from './events.mjs';
 
 const ADDRESS = /^[^\s<>@,;"]+@[^\s<>@,;"]+$/; // also keeps line breaks and extra commands out of the SMTP conversation
@@ -12,12 +13,16 @@ const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 const oneLine = (s) => String(s).replace(/[\r\n]+/g, ' ');
 const header = (s) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${b64(s)}?=`);
 
-// base64 body: no dot-stuffing or line-length worries, any text is safe
-const build = ({ from, to, subject, text }) => [
-  `From: ${from}`, `To: ${to.join(', ')}`, `Subject: ${header(oneLine(subject))}`, `Date: ${new Date().toUTCString()}`,
-  `Message-ID: <${crypto.randomUUID()}@reportarr>`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', '',
-  b64(text).replace(/.{1,76}/g, '$&\r\n'),
-].join('\r\n');
+// base64 bodies: no dot-stuffing or line-length worries, any text is safe. With html, the message is multipart/alternative: the plain
+// text first (for clients that show no HTML), the HTML last (the one most clients prefer).
+const wrap = (s) => b64(s).replace(/.{1,76}/g, '$&\r\n');
+const part = (type, body) => [`Content-Type: ${type}; charset=utf-8`, 'Content-Transfer-Encoding: base64', '', wrap(body)].join('\r\n');
+const build = ({ from, to, subject, text, html }) => {
+  const head = [`From: ${from}`, `To: ${to.join(', ')}`, `Subject: ${header(oneLine(subject))}`, `Date: ${new Date().toUTCString()}`, `Message-ID: <${crypto.randomUUID()}@reportarr>`, 'MIME-Version: 1.0'];
+  if (!html) return [...head, part('text/plain', text)].join('\r\n');
+  const b = `=_reportarr_${crypto.randomUUID()}`;
+  return [...head, `Content-Type: multipart/alternative; boundary="${b}"`, '', `--${b}`, part('text/plain', text), `--${b}`, part('text/html', html), `--${b}--`, ''].join('\r\n');
+};
 
 const open = (host, port, implicit) => new Promise((resolve, reject) => {
   const s = implicit ? tls.connect({ host, port, servername: host }) : net.connect({ host, port });
@@ -147,12 +152,13 @@ const smtp = {
 
   // msg is { event, title, lines, to?, server? }: server is the SERVER_NAME setting, shown so you can tell servers apart
   send: (ch, msg) => sendMail({ ...ch, to: msg.to ?? addresses(ch.to), // a message can name its own recipient: the reporter
-    subject: `[Reportarr${msg.server ? ` - ${msg.server}` : ''}] ${msg.title}`, text: `${msg.lines.join('\n')}\n\n— ${SIGN_OFF}${msg.server ? ` on ${msg.server}` : ''}\n` }),
+    subject: `[Reportarr${msg.server ? ` - ${msg.server}` : ''}] ${msg.title}`, text: `${msg.lines.join('\n')}\n\n— ${SIGN_OFF}${msg.server ? ` on ${msg.server}` : ''}\n`, html: msg.html }),
 
   checkArgs: (req, stored) => ({ host: req.host, port: req.port, username: req.username, password: req.password || stored?.password || '', from: req.from, to: req.to, tls: req.tls !== false }),
-  async check(ch, { server } = {}) {
+  async check(ch, { server, dryRun } = {}) {
     if (!smtp.isConfigured(ch)) return fail('Set a host, a From address and at least one To address first');
-    await smtp.send(ch, { event: 'test', title: 'Test message', lines: ['Reportarr can send email through this server.'], server });
+    const rows = [{ title: 'Test message', source: ch.name, detail: 'Reportarr can send email through this server.', time: new Date().toISOString() }];
+    await smtp.send(ch, { event: 'test', title: 'Test message', lines: ['Reportarr can send email through this server.'], server, html: notificationHtml({ event: 'test', rows, server, dryRun, subject: 'Test message' }) });
     return pass('Test email sent');
   },
 };

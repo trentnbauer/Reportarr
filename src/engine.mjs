@@ -9,7 +9,7 @@ import { runCheck } from './checks.mjs';
 import { SOURCES, ARRS, SUBTITLES, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
-import { notifyRow, notifyReporter } from './notify.mjs';
+import { notifyRow, notifyReporter, onAlert } from './notify.mjs';
 
 const dataFile = (n) => path.join(DATA_DIR, n);
 export const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -34,6 +34,7 @@ export function record(entry) {
   notifyRow(entry);
   notifyReporter(entry);
 }
+onAlert(record); // the alerts sent are logged too (the notify module cannot import this one)
 
 // The hourly limit is one window per clock hour (UTC): the count restarts at the top of the hour.
 // shortcut: a burst either side of the top of the hour can be twice the limit within minutes, use a rolling window if that matters.
@@ -134,7 +135,7 @@ function countUser(c, s, report) {
   if (!u) return;
   const day = dayKey(), e = ((s.users ??= {})[u.key] = s.users[u.key]?.day === day ? s.users[u.key] : { day, count: 0 });
   e.count++;
-  if (c.maxPerUserPerDay > 0 && e.count === c.maxPerUserPerDay) record({ status: 'info', userLimit: true, user: u.name, source: labelOf(report), detail: `${u.name} reached their daily limit of ${c.maxPerUserPerDay}: their other reports are held until tomorrow, or press Override` });
+  if (c.maxPerUserPerDay > 0 && e.count === c.maxPerUserPerDay) record({ status: 'info', userLimit: true, reportId: report.id, user: u.name, source: labelOf(report), detail: `${u.name} reached their daily limit of ${c.maxPerUserPerDay}: their other reports are held until tomorrow, or press Override` });
 }
 // The Override buttons, applied at the start of the next poll (the poll owns the state). A report is let through the user limit, or the
 // hourly limit is lifted for the rest of the hour.
@@ -214,7 +215,7 @@ const context = (c, s) => ({
     // later: files of this report the hourly limit did not leave room for. They wait here, slimmed down to what swap() needs,
     // and carry on as the limit resets (see resume()); the report is not finished until they are all through.
     const slim = ({ a, ep, movie, ...h }) => ({ ...h, arr: a.name, ...(ep && { ep: { id: ep.id } }), ...(movie && { movie: { id: movie.id } }) });
-    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, user: report.user, items,
+    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, reportedAt: report.issue?.createdAt, user: report.user, items,
       backlog: later.map(slim), ...(later.length ? { hadBacklog: true } : {}), since: new Date().toISOString() });
     writeJson(stateFile(), s);
   },
@@ -462,6 +463,12 @@ export async function poll() {
   for (const [i, r] of fresh.entries()) {
     // once the limit is full, new reports wait unseen and are handled when it resets, instead of being dropped
     if (capFull(c, s)) {
+      // each waiting report says so in its own timeline (once an hour), then the one row for the whole queue
+      for (const w of fresh.slice(i)) {
+        if ((s.waitNoted ??= {})[w.id] === hourKey()) continue;
+        s.waitNoted[w.id] = hourKey(); received(w);
+        record({ status: 'info', reportId: w.id, source: labelOf(w), detail: `waiting: the hourly limit of ${c.maxPerHour} is reached; it is handled when the hour turns over` });
+      }
       if (s.capNoted !== hourKey()) { s.capNoted = hourKey(); record({ status: 'info', detail: `hourly limit ${c.maxPerHour} reached; ${fresh.length - i} new report(s) wait until the next hour` }); }
       break;
     }

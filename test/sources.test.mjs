@@ -127,6 +127,7 @@ test('live: the cap counts real replacements and delays (never drops) new report
   assert.deepEqual(replaced(), ['cap-1']);
   assert.match(changes().at(-1).detail, /hourly limit 1 reached; 1 new report\(s\) wait until the next hour/);
   assert.ok(!st().seen.includes('cap-2'), 'the second report waits');
+  assert.ok(changes().some((r) => r.reportId === 'cap-2' && /waiting: the hourly limit of 1 is reached/.test(r.detail)), 'and says so in its own timeline');
   lose(); newDay(); await poll();
   assert.deepEqual(replaced(), ['cap-2'], 'and is handled when the limit resets');
 

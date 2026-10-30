@@ -180,6 +180,44 @@ test('events close together are one message, and each channel gets only the even
   assert.match(to('/failures')[0].body.embeds[0].description, /Film: DELETE \/moviefile\/5 500/);
 });
 
+test('every alert sent, or that failed, is logged under the report it was about, and logging it does not alert again', async () => {
+  const alerts = () => JSON.parse(fs.readFileSync(changesFile(), 'utf8')).filter((r) => r.status === 'alert');
+  await flushAll(); fs.writeFileSync(changesFile(), '[]'); posts.length = 0;
+  saveConfig({ notifications: [] }); // only the two Discord channels from the environment remain
+  for (const [reportId, title] of [['overseerr:1', 'Show S01E01'], ['overseerr:1', 'Show S01E02'], ['overseerr:2', 'Film']]) notifyRow({ status: 'replaced', reportId, title, source: 'Overseerr issue', instance: 'sonarr' });
+  await flushAll();
+  const rows = alerts();
+  assert.deepEqual(rows.map((r) => r.reportId).sort(), ['overseerr:1', 'overseerr:2'], 'one row per report, not per file');
+  assert.ok(rows.every((r) => r.detail === 'Replaced (3) alert sent via everything' && !r.failed));
+  assert.equal(eventOf(rows[0]), undefined, 'an alert row is not itself an event');
+  // a failing channel: the row says which, and is flagged
+  fs.writeFileSync(changesFile(), '[]');
+  saveConfig({ notifications: [{ ...SMTP, password: 'wrong' }] });
+  notifyRow({ status: 'error', reportId: 'overseerr:3', title: 'Film', detail: 'DELETE /moviefile/5 500', source: 'Overseerr issue' });
+  await flushAll();
+  const bad = alerts().find((r) => r.reportId === 'overseerr:3');
+  assert.equal(bad.failed, true);
+  assert.match(bad.detail, /^Failed alert sent via everything, discord-2; failed: email-1: .*535 bad login/);
+  saveConfig({ notifications: [] });
+});
+
+test('the email to a reporter is logged under their report, naming them and never their address; a failure is logged too', async () => {
+  const alerts = () => JSON.parse(fs.readFileSync(changesFile(), 'utf8')).filter((r) => r.status === 'alert');
+  fs.writeFileSync(changesFile(), '[]');
+  saveConfig({ notifications: [{ ...SMTP, toReporter: true }] });
+  await notifyReporter({ reporterEmail: 'fay@example.com', reportId: 'overseerr:9', userName: 'fay', outcome: 'Denied', notice: 'Series report. Report a season or 1 file.', source: 'Overseerr issue #9' });
+  const row = alerts().at(-1);
+  assert.equal(row.reportId, 'overseerr:9');
+  assert.match(row.detail, /^Emailed the reporter \(fay\): Denied - Series report\. Report a season or 1 file\.$/);
+  assert.ok(!JSON.stringify(row).includes('fay@example.com'));
+  saveConfig({ notifications: [{ ...SMTP, toReporter: true, password: 'wrong' }] });
+  await notifyReporter({ reporterEmail: 'fay@example.com', reportId: 'overseerr:9', userName: 'fay', outcome: 'Denied', notice: 'n' });
+  const bad = alerts().at(-1);
+  assert.equal(bad.failed, true);
+  assert.match(bad.detail, /failed: email-1: .*535 bad login/);
+  saveConfig({ notifications: [] });
+});
+
 test('a broken channel never stops anything', async () => {
   saveConfig({ notifications: [] });
   const c = compose('replaced', Array.from({ length: 25 }, (_, i) => ({ title: `T${i}` })));
@@ -220,7 +258,13 @@ test('the template is saved with the channel, shown to the UI, and exported to .
   saveConfig({ notifications: [] });
 });
 
-const bodyOf = (m) => { const [head, body] = m.raw.split('\r\n\r\n'); return { head, text: Buffer.from(body.replace(/\r\n/g, '').replace(/\.$/, ''), 'base64').toString() }; };
+const decode = (s) => Buffer.from(s.replace(/\r\n/g, '').replace(/\.$/, ''), 'base64').toString();
+const bodyOf = (m) => { // a plain message, or multipart/alternative with the plain text and the HTML
+  const i = m.raw.indexOf('\r\n\r\n'), head = m.raw.slice(0, i), body = m.raw.slice(i + 4), b = /boundary="([^"]+)"/.exec(head)?.[1];
+  if (!b) return { head, text: decode(body) };
+  const parts = Object.fromEntries(body.split(`--${b}`).filter((p) => /Content-Type/.test(p)).map((p) => [/Content-Type: text\/(\w+)/.exec(p)[1], decode(p.slice(p.indexOf('\r\n\r\n') + 4))]));
+  return { head, text: parts.plain, html: parts.html };
+};
 
 test('the reporter is emailed when their report is completed, with the reason, only through a channel that has it on', async () => {
   saveConfig({ notifications: [{ ...SMTP, name: 'on', toReporter: true }, { ...SMTP, name: 'off', toReporter: false }] });
@@ -233,6 +277,7 @@ test('the reporter is emailed when their report is completed, with the reason, o
   assert.match(text, /Denied - Series report\. Report a season or 1 file\./);
   assert.match(text, /http:\/\/seerr\/issues\/9/);
   assert.match(text, /— Reportarr \(automated system\)/);
+  assert.match(bodyOf(mails[0]).html, /Series report\. Report a season or 1 file\./, 'and the HTML version says it too');
   mails.length = 0;
   await notifyReporter({ outcome: 'Denied', notice: 'x' });
   await notifyReporter({ reporterEmail: 'bob@example.com', outcome: 'Denied' });

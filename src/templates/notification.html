@@ -1,0 +1,108 @@
+<!doctype html>
+<!--
+  Reportarr — SMTP notification email (to the admin addresses in SMTP_TO).
+  Mustache-style placeholders. {{server_name}} is the Plex/Reportarr server name shown in the header, subject and footer.
+
+  {{server_name}}   e.g. "Media Server"
+  {{subject}}       e.g. "3 files replaced on Media Server"
+  {{preheader}}     ~85 chars shown next to the subject in the inbox
+  {{heading}}       e.g. "3 files replaced"
+  {{summary}}       one sentence under the heading
+  {{app_url}}       link to the Reportarr web UI
+  {{mode_label}}    "LIVE" or "DRY RUN"
+  {{mode_bg}} {{mode_fg}}  LIVE: #fcebe9 / #b42318   DRY RUN: #fbf1df / #8f5d07
+  {{#events}} … {{/events}}  one row per batched event:
+    {{status_label}}  Replaced · Resolved · Failed · Held · Limit reached
+    {{status_bg}} {{status_fg}}
+                      Replaced/Resolved: #e5f3ea / #157f3b
+                      Replacing/Dry run/Held/Limit: #fbf1df / #8f5d07
+                      Failed: #fcebe9 / #b42318
+                      Skipped/Denied/other: #eceef1 / #4b5260
+    {{title}} {{source}} {{instance}} {{file}} {{detail}} {{time}}
+-->
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{subject}}</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  body { margin:0 !important; padding:0 !important; width:100% !important; }
+  a { color:#b8780a; }
+  @media (max-width:620px) { .px { padding-left:20px !important; padding-right:20px !important; } .when { display:block !important; text-align:left !important; padding-top:4px !important; } }
+  @media (prefers-color-scheme: dark) {
+    .bg { background:#141619 !important; } .card { background:#1b1f24 !important; border-color:#2f353c !important; }
+    .fg { color:#e8eaed !important; } .muted { color:#9aa0a6 !important; } .line { border-color:#262b31 !important; }
+    .chip { background:#1a1d21 !important; border-color:#2f353c !important; color:#c3c7cd !important; }
+    .code { background:#141619 !important; border-color:#262b31 !important; color:#e8eaed !important; }
+    .btn { background:#e5a00d !important; } a.link { color:#e5a00d !important; }
+  }
+</style>
+</head>
+<body class="bg" style="margin:0;padding:0;background:#f6f7f9;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#f6f7f9;opacity:0;">{{preheader}}&#8202;&#847;&#8202;&#847;&#8202;&#847;&#8202;&#847;&#8202;&#847;&#8202;&#847;&#8202;&#847;&#8202;&#847;</div>
+<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f6f7f9;">
+<tr><td align="center" style="padding:32px 12px;">
+  <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;">
+    <tr><td class="px" style="padding:0 4px 14px 4px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td class="fg" style="font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:18px;line-height:24px;mso-line-height-rule:exactly;font-weight:700;letter-spacing:-0.01em;color:#1b1e23;">Reportarr</td>
+          <td align="right" style="font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;">
+            <span class="chip" style="display:inline-block;padding:3px 10px;border:1px solid #dfe2e6;border-radius:99px;background:#ffffff;font-size:12px;line-height:16px;color:#4b5260;font-weight:600;">{{server_name}}</span>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+    <tr><td class="card" style="background:#ffffff;border:1px solid #dfe2e6;border-radius:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td class="px" style="padding:26px 28px 6px 28px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;">
+          <span style="display:inline-block;padding:2px 9px;border-radius:99px;background:{{mode_bg}};color:{{mode_fg}};font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.06em;">&#9679;&nbsp;{{mode_label}}</span>
+        </td></tr>
+        <tr><td class="px fg" style="padding:10px 28px 0 28px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:22px;line-height:28px;mso-line-height-rule:exactly;font-weight:700;letter-spacing:-0.01em;color:#1b1e23;">{{heading}}</td></tr>
+        <tr><td class="px muted" style="padding:6px 28px 22px 28px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:21px;mso-line-height-rule:exactly;color:#6b7280;">{{summary}}</td></tr>
+        <tr><td class="px" style="padding:0 28px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {{#events}}
+            <tr><td class="line" style="padding:14px 0;border-top:1px solid #eceef1;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td valign="top" style="font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;">
+                    <span style="display:inline-block;padding:2px 9px;border-radius:99px;background:{{status_bg}};color:{{status_fg}};font-size:12px;line-height:16px;font-weight:600;white-space:nowrap;">&#9679;&nbsp;{{status_label}}</span>
+                  </td>
+                  <td class="when muted" valign="top" align="right" style="font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12.5px;line-height:20px;color:#6b7280;white-space:nowrap;">{{time}}</td>
+                </tr>
+                <tr><td colspan="2" style="padding-top:8px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;">
+                  <span class="fg" style="font-size:14px;line-height:20px;font-weight:600;color:#1b1e23;">{{title}}</span>
+                  <span class="muted" style="font-size:12px;line-height:20px;color:#6b7280;">&nbsp;&nbsp;{{source}}</span>
+                </td></tr>
+                <tr><td colspan="2" class="muted" style="padding-top:5px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;mso-line-height-rule:exactly;color:#6b7280;word-break:break-word;">
+                  {{#instance}}<span class="code" style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace;font-size:12px;color:#1b1e23;background:#f6f7f9;border:1px solid #eceef1;border-radius:4px;padding:0 5px;">{{instance}}</span> {{/instance}}{{#file}}<span class="code" style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace;font-size:12px;color:#1b1e23;background:#f6f7f9;border:1px solid #eceef1;border-radius:4px;padding:0 5px;">{{file}}</span> {{/file}}{{detail}}
+                </td></tr>
+              </table>
+            </td></tr>
+            {{/events}}
+          </table>
+        </td></tr>
+        {{#app_url}}<tr><td class="px line" style="padding:20px 28px 26px 28px;border-top:1px solid #eceef1;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <tr><td class="btn" bgcolor="#b8780a" style="background:#b8780a;border-radius:8px;">
+              <a href="{{app_url}}" style="display:block;padding:10px 20px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;font-weight:600;color:#111111;text-decoration:none;border-radius:8px;">Open Reportarr</a>
+            </td></tr>
+          </table>
+        </td></tr>{{/app_url}}
+      </table>
+    </td></tr>
+    <tr><td class="px muted" style="padding:16px 4px 0 4px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:18px;mso-line-height-rule:exactly;color:#6b7280;">
+      Reportarr (automated system) on {{server_name}}. You get this because this email channel is set up in Reportarr's Notifications tab; change its events there or with <span style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace;">SMTP_EVENTS</span>.
+    </td></tr>
+  </table>
+  <!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>
