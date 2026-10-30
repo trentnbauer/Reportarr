@@ -102,7 +102,7 @@ const template = (key) => TEMPLATES.find((t) => t.key === String(key ?? '').trim
 const entry = (name, v) => {
   const t = template(v('TEMPLATE'));
   return { name, kind: 'smtp', template: t?.key ?? '', host: v('HOST') ?? t?.host ?? '', port: v('PORT') ?? t?.port ?? '587', username: v('USERNAME') ?? '', password: v('PASSWORD') ?? '', from: v('FROM') ?? '', to: v('TO') ?? '',
-    tls: v('TLS') !== undefined ? v('TLS') !== 'false' : t?.tls ?? true, ...eventFlags(v('EVENTS')) };
+    tls: v('TLS') !== undefined ? v('TLS') !== 'false' : t?.tls ?? true, toReporter: v('TO_REPORTER') === 'true', ...eventFlags(v('EVENTS')) };
 };
 
 const smtp = {
@@ -115,10 +115,14 @@ const smtp = {
     { name: 'from', label: 'From', type: 'email' },
     { name: 'to', label: 'To', hint: 'Comma-separate several addresses' },
   ],
-  switches: [{ name: 'tls', label: 'Use TLS', hint: 'STARTTLS or implicit TLS, by port' }, ...eventSwitches],
-  defaults: { host: '', port: '587', username: '', password: '', from: '', to: '', tls: true },
+  switches: [
+    { name: 'tls', label: 'Use TLS', hint: 'STARTTLS or implicit TLS, by port' },
+    { name: 'toReporter', label: 'Email the reporter', hint: 'When a report is completed (resolved, denied or skipped), email the person who made it, with the reason' },
+    ...eventSwitches,
+  ],
+  defaults: { host: '', port: '587', username: '', password: '', from: '', to: '', tls: true, toReporter: false },
 
-  // SMTP_TEMPLATE=gmail fills in the host, port and TLS for a common provider (see TEMPLATES). SMTP_HOST (+ SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM, SMTP_TO, SMTP_TLS, SMTP_EVENTS, SMTP_NAME) is one channel;
+  // SMTP_TO_REPORTER=true also emails the person who made a Seerr report when it is completed. SMTP_TEMPLATE=gmail fills in the host, port and TLS for a common provider (see TEMPLATES). SMTP_HOST (+ SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM, SMTP_TO, SMTP_TLS, SMTP_EVENTS, SMTP_NAME) is one channel;
   // SMTP_2_HOST ... are more
   fromEnv(e) {
     const out = [];
@@ -126,7 +130,7 @@ const smtp = {
     for (const n of [...new Set([...envIndexes(e, 'SMTP', 'HOST'), ...envIndexes(e, 'SMTP', 'TEMPLATE')])].sort((a, b) => a - b)) out.push(entry(e[`SMTP_${n}_NAME`] || `email-${n}`, (k) => e[`SMTP_${n}_${k}`]));
     return out;
   },
-  envLines: (s, n) => [['NAME', s.name], ['TEMPLATE', s.template ?? ''], ['HOST', s.host], ['PORT', s.port], ['USERNAME', s.username], ['PASSWORD', s.password], ['FROM', s.from], ['TO', s.to], ['TLS', s.tls !== false], ['EVENTS', eventsLine(s)]].map(([k, v]) => [`SMTP_${n}_${k}`, v]),
+  envLines: (s, n) => [['NAME', s.name], ['TEMPLATE', s.template ?? ''], ['HOST', s.host], ['PORT', s.port], ['USERNAME', s.username], ['PASSWORD', s.password], ['FROM', s.from], ['TO', s.to], ['TLS', s.tls !== false], ['TO_REPORTER', s.toReporter === true], ['EVENTS', eventsLine(s)]].map(([k, v]) => [`SMTP_${n}_${k}`, v]),
   validate(x) {
     if (!x.host) return 'needs a host';
     if (x.port && !(Number.isInteger(+x.port) && +x.port >= 1 && +x.port <= 65535)) return 'the port must be a number from 1 to 65535';
@@ -137,12 +141,13 @@ const smtp = {
   },
   normalize: (s, old) => ({
     name: s.name, kind: 'smtp', template: template(s.template)?.key ?? '', host: String(s.host ?? '').trim(), port: String(s.port || '587'), username: String(s.username ?? '').trim(), password: s.password || old?.password || '',
-    from: String(s.from ?? '').trim(), to: addresses(s.to).join(', '), tls: s.tls !== false, ...flagsOf(s),
+    from: String(s.from ?? '').trim(), to: addresses(s.to).join(', '), tls: s.tls !== false, toReporter: s.toReporter === true, ...flagsOf(s),
   }),
   isConfigured: (s) => !!(s.host && ADDRESS.test(s.from ?? '') && addresses(s.to).length),
 
   // msg is { event, title, lines }
-  send: (ch, msg) => sendMail({ ...ch, to: addresses(ch.to), subject: `[Reportarr] ${msg.title}`, text: `${msg.lines.join('\n')}\n\n— ${SIGN_OFF}\n` }),
+  send: (ch, msg) => sendMail({ ...ch, to: msg.to ?? addresses(ch.to), // a message can name its own recipient: the reporter
+    subject: `[Reportarr] ${msg.title}`, text: `${msg.lines.join('\n')}\n\n— ${SIGN_OFF}\n` }),
 
   checkArgs: (req, stored) => ({ host: req.host, port: req.port, username: req.username, password: req.password || stored?.password || '', from: req.from, to: req.to, tls: req.tls !== false }),
   async check(ch) {

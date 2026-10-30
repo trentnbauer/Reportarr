@@ -75,7 +75,7 @@ const base = { dryRun: false, clients: [], sources: [SRC],
 const movie = { tmdbId: 603, tvdbId: null, mediaType: 'movie' };
 const tv = { tmdbId: 1399, tvdbId: 81189, mediaType: 'tv' };
 const issue = (id, media, extra = {}) => ({ id, issueType: 1, status: 1, problemSeason: 0, problemEpisode: 0, media, createdAt: '2026-10-29T00:00:00Z', ...extra });
-const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, kind: 'seerr', source: 'overseerr', src: cfg.sources[0], issue: i, user: i.createdBy && { key: `overseerr:${i.createdBy.id}`, name: i.createdBy.plexUsername } }); return calls.filter((c) => !c.includes('GET')); };
+const run = async (i, cfg = base) => { calls.length = 0; await replaceIssue(cfg, { id: `overseerr:${i.id}`, kind: 'seerr', source: 'overseerr', src: cfg.sources[0], issue: i, user: i.createdBy && { key: `overseerr:${i.createdBy.id}`, name: i.createdBy.plexUsername, email: i.createdBy.email } }); return calls.filter((c) => !c.includes('GET')); };
 const changes = () => JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'changes.json'), 'utf8'));
 
 test('a movie issue deletes the file, blocklists, searches, then comments but does not resolve yet', async () => {
@@ -194,6 +194,29 @@ test('a subtitle issue goes to Bazarr: the subtitle files are deleted and search
   assert.deepEqual(await run(issue(62, tv, { issueType: 3, problemSeason: 1, problemEpisode: 2 }), { ...on, subtitles: [] }), []);
   assert.equal(changes().at(-1).status, 'denied');
   assert.match(changes().at(-1).detail, /no subtitle manager \(Bazarr\)/);
+});
+
+test('a completed report carries the reason for the reporter (and never their address) when it is denied, skipped or resolved', async () => {
+  const erin = { id: 11, plexUsername: 'erin', email: 'erin@example.com' }, dana = { id: 12, plexUsername: 'dana', email: 'dana@example.com' };
+  const off = { ...base, sources: [{ ...SRC, wholeSeries: false }] };
+  await run(issue(80, tv, { createdBy: erin }), off);
+  const denied = changes().find((r) => r.reportId === 'overseerr:80' && r.status === 'denied');
+  assert.deepEqual([denied.outcome, denied.notice], ['Denied', 'Series report. Report a season or 1 file.']);
+  assert.match(denied.link, /\/issues\/80$/);
+  await run(issue(81, { tmdbId: 1, tvdbId: null, mediaType: 'movie' }, { createdBy: erin }));
+  assert.match(changes().at(-1).notice, /No file was found/);
+  assert.equal(changes().at(-1).outcome, 'Skipped');
+  await run(issue(82, movie, { issueType: 3, createdBy: dana }));
+  assert.match(changes().at(-1).notice, /Subtitle (issues|problems) are not fixed automatically/, 'subtitles denied');
+  // resolved: through a replacement and a poll
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs, maxPerHour: 1000 });
+  issues = [];
+  await run(issue(83, tv, { problemSeason: 2, problemEpisode: 1, createdBy: erin }));
+  imported = true; calls.length = 0; await poll(); imported = false;
+  const done = changes().find((r) => r.reportId === 'overseerr:83' && r.status === 'resolved');
+  assert.deepEqual([done.outcome, done.notice, done.title], ['Resolved', 'The file was replaced and the new one is ready.', 'Show S02E01']);
+  assert.ok(!JSON.stringify(changes()).includes('example.com'), 'no address anywhere in the log');
+  assert.ok(!(await run(issue(84, tv, { createdBy: erin }), { ...off, dryRun: true })).length);
 });
 
 test('a report naming no season replaces every episode with a file, in every season', async () => {

@@ -9,7 +9,7 @@ import { runCheck } from './checks.mjs';
 import { SOURCES, ARRS, SUBTITLES, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
-import { notifyRow } from './notify.mjs';
+import { notifyRow, notifyReporter } from './notify.mjs';
 
 const dataFile = (n) => path.join(DATA_DIR, n);
 export const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -27,10 +27,12 @@ let lastArrCheck = 0;
 // What the UI shows: one row per action the app took (or would take, in dry-run).
 export function record(entry) {
   const rows = readJson(changesFile(), []);
-  rows.push({ id: crypto.randomUUID(), time: new Date().toISOString(), ...entry });
+  const { reporterEmail, ...saved } = entry; // the reporter's address is used to email them, but kept out of the log (and the page that shows it)
+  rows.push({ id: crypto.randomUUID(), time: new Date().toISOString(), ...saved });
   writeJson(changesFile(), rows.slice(-2000));
   log(entry.status, entry.title ?? '', entry.instance ?? '', entry.detail ?? '');
   notifyRow(entry);
+  notifyReporter(entry);
 }
 
 // The hourly limit is one window per clock hour (UTC): the count restarts at the top of the hour.
