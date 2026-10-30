@@ -11,6 +11,7 @@ const NEEDS = {
   arrs: ['api', 'appName', 'envLines', 'normalize', 'plan'],
   clients: ['implementation', 'prioritize', 'legacy'],
   notifications: ['envLines', 'normalize', 'isConfigured', 'send', 'validate', 'switches'], // not an address, so no defaultUrl or url field
+  subtitles: ['envLines', 'normalize', 'isConfigured', 'refresh'],
 };
 
 for (const [list, mods] of Object.entries(LISTS)) {
@@ -38,14 +39,15 @@ test('an *arr app says how to find a reported file (or an issue) and how to repl
 
 test('the UI is told every kind, with its label, fields and defaults, so it hard-codes no app names', () => {
   const meta = kindsMeta();
-  assert.deepEqual(Object.keys(meta), ['sources', 'arrs', 'clients', 'notifications']);
+  assert.deepEqual(Object.keys(meta), ['sources', 'arrs', 'clients', 'notifications', 'subtitles']);
+  assert.deepEqual(Object.keys(meta.subtitles), ['bazarr']);
   assert.deepEqual(Object.keys(meta.notifications), ['discord', 'smtp']);
   assert.deepEqual(Object.keys(meta.sources), ['plex', 'seerr']);
-  assert.deepEqual(Object.keys(meta.arrs), ['sonarr', 'radarr', 'lidarr']);
+  assert.deepEqual(Object.keys(meta.arrs), ['sonarr', 'radarr', 'lidarr', 'whisparr']);
   assert.deepEqual(Object.keys(meta.clients), ['qbittorrent', 'sabnzbd']);
   for (const kinds of Object.values(meta)) for (const [k, m] of Object.entries(kinds)) assert.ok(typeof m.label === 'string' && m.label, `${k} has a name to show`);
   assert.equal(meta.sources.seerr.switches[0].name, 'resolve');
-  assert.deepEqual(meta.sources.seerr.defaults, { issueTypes: 'video,audio,other', resolve: true, wholeSeries: true });
+  assert.deepEqual(meta.sources.seerr.defaults, { issueTypes: 'video,audio,subtitles,other', resolve: true, wholeSeries: true });
   assert.ok(!JSON.stringify(meta).includes('function'), 'plain data only');
 });
 

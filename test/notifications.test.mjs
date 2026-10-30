@@ -139,7 +139,7 @@ test('the environment defines channels, read-only, with the events they listen t
 test('the .env export includes the channels, and reads back the same', () => {
   const out = envFile();
   assert.match(out, /^SMTP_1_HOST=127\.0\.0\.1$/m);
-  assert.match(out, /^SMTP_1_EVENTS=replaced,failed,resolved,cap$/m);
+  assert.match(out, /^SMTP_1_EVENTS=replaced,failed,resolved,cap,userlimit$/m);
   assert.match(out, /^DISCORD_3_WEBHOOK=https:\/\/discord\.com\/api\/webhooks\/1\/tok$/m, 'channels added in the UI follow the ones from the environment');
 });
 
@@ -152,6 +152,15 @@ test('log rows become events; queue-priority failures and repeats of the daily c
   assert.equal(eventOf({ status: 'dry-run' }), undefined);
   assert.equal(eventOf({ status: 'info', detail: 'hourly limit 20 reached; 2 new report(s) wait until the next hour' }), 'cap');
   assert.equal(eventOf({ status: 'skipped', detail: 'hourly limit 20 reached: not replaced' }), undefined, 'once an hour');
+});
+
+test('a user reaching their daily limit is announced once a day, however many of their reports are held', () => {
+  const row = { status: 'held', userLimit: true, user: 'alice', detail: 'alice has reached their daily limit of 5' };
+  assert.equal(eventOf(row), 'userlimit');
+  assert.equal(eventOf({ ...row, reportId: 'overseerr:2' }), undefined, 'a second held report of hers adds no message');
+  assert.equal(eventOf({ ...row, user: 'bob' }), 'userlimit', 'another user is told about separately');
+  assert.equal(eventOf({ status: 'info', userLimit: true, user: 'carol', detail: 'carol reached their daily limit of 5' }), 'userlimit', 'reaching it mid-run counts too');
+  assert.match(compose('userlimit', [row]).lines[0], /alice has reached their daily limit/);
 });
 
 test('events close together are one message, and each channel gets only the events it chose', async () => {

@@ -10,10 +10,17 @@ const WAIT_MS = 5000;
 const MAX_LINES = 20;
 const queue = new Map(); // event -> { items: [log rows], timer }
 let capHour = '';
+const userLimitDay = new Map(); // user -> the day we last told about them
 
 // What a log row means to a notification channel, if anything.
 export function eventOf(r) {
   const detail = r.detail ?? '';
+  if (r.userLimit) { // a user reached their daily limit: once a day per user, however many of their reports are held
+    const day = new Date().toLocaleDateString('en-CA');
+    if (userLimitDay.get(r.user) === day) return;
+    userLimitDay.set(r.user, day);
+    return 'userlimit';
+  }
   if (r.status === 'replaced') return 'replaced';
   if (r.status === 'resolved') return 'resolved';
   if (r.status === 'error') return /^priority failed/.test(detail) ? undefined : 'failed'; // a queue priority that did not work is not worth a message
@@ -25,7 +32,7 @@ export function eventOf(r) {
   }
 }
 
-const HEAD = { replaced: 'Replaced', failed: 'Failed', resolved: 'Resolved', cap: 'Hourly limit reached' };
+const HEAD = { replaced: 'Replaced', failed: 'Failed', resolved: 'Resolved', cap: 'Hourly limit reached', userlimit: 'User limit reached' };
 const lineOf = (event, r) => {
   if (event === 'replaced') return `${r.title ?? r.source ?? 'A file'}${r.instance ? ` on ${r.instance}` : ''}${r.file ? ` (${r.file})` : ''}`;
   if (event === 'failed') return `${r.title ? `${r.title}: ` : ''}${r.detail ?? 'something went wrong'}${r.source ? ` (${r.source})` : ''}`;

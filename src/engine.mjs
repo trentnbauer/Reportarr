@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR, getConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
-import { SOURCES, ARRS, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
+import { SOURCES, ARRS, SUBTITLES, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
 import { notifyRow } from './notify.mjs';
@@ -40,7 +40,7 @@ const nextHour = () => { const d = new Date(); d.setUTCMinutes(0, 0, 0); return 
 // How many replacements this hour out of the hourly limit, and when the count restarts.
 export const limitUsage = (c) => {
   const s = readJson(stateFile(), {});
-  return { count: s.hour === hourKey() ? s.count ?? 0 : 0, max: c.maxPerHour, resetsAt: nextHour() };
+  return { count: s.hour === hourKey() ? s.count ?? 0 : 0, max: c.maxPerHour, resetsAt: nextHour(), overridden: s.limitOverride === hourKey() };
 };
 
 // Health entries for what is configured now (a removed source or instance must not linger).
@@ -49,6 +49,7 @@ export const currentHealth = (c) => Object.fromEntries([
   ...c.arrs.map((x) => [`arr:${x.name}`, health[`arr:${x.name}`]]),
   ...c.clients.map((x) => [`client:${x.name}`, health[`client:${x.name}`]]),
   ...c.notifications.map((x) => [`notification:${x.name}`, health[`notification:${x.name}`]]),
+  ...c.subtitles.map((x) => [`subtitle:${x.name}`, health[`subtitle:${x.name}`]]),
 ].filter(([, v]) => v));
 
 // a call to a Sonarr/Radarr/Lidarr instance, on the API version its kind uses
@@ -110,20 +111,75 @@ const prioritizeLater = (c, a, match, title, base) => prioritize(c, a, matches(m
 // The hourly limit: s.count is how many items (an episode, a movie, an album) were really replaced this hour.
 const capFull = (c, s) => {
   if (s.hour !== hourKey()) Object.assign(s, { hour: hourKey(), count: 0 });
-  return s.count >= c.maxPerHour;
+  return s.limitOverride !== hourKey() && s.count >= c.maxPerHour; // overridden from the UI for the rest of this hour
 };
 // How many more replacements this hour's limit allows (unlimited when none is set).
-const allowance = (c, s) => { if (!Number.isFinite(c.maxPerHour)) return Infinity; capFull(c, s); return Math.max(0, c.maxPerHour - (s.count ?? 0)); };
+// Both limits at once: the hourly limit for everyone, and (for a report that names who made it) that person's daily limit.
+const dayKey = () => new Date().toLocaleDateString('en-CA'); // local date: the daily count restarts at local midnight
+const userRoom = (c, s, report) => {
+  const u = report?.user, max = c.maxPerUserPerDay;
+  if (!u || !(max > 0) || s.overrides?.includes(report.id)) return Infinity; // no user (Plex reports), no limit, or overridden
+  const e = s.users?.[u.key];
+  return Math.max(0, max - (e?.day === dayKey() ? e.count : 0));
+};
+const allowance = (c, s, report) => {
+  const hourly = s.limitOverride === hourKey() || !Number.isFinite(c.maxPerHour) ? Infinity : (capFull(c, s), Math.max(0, c.maxPerHour - (s.count ?? 0)));
+  return Math.min(hourly, userRoom(c, s, report));
+};
+// A replacement counts toward its reporter's day too; reaching the limit is announced once (a notification), and their other reports are held.
+function countUser(c, s, report) {
+  const u = report.user;
+  if (!u) return;
+  const day = dayKey(), e = ((s.users ??= {})[u.key] = s.users[u.key]?.day === day ? s.users[u.key] : { day, count: 0 });
+  e.count++;
+  if (c.maxPerUserPerDay > 0 && e.count === c.maxPerUserPerDay) record({ status: 'info', userLimit: true, user: u.name, source: labelOf(report), detail: `${u.name} reached their daily limit of ${c.maxPerUserPerDay}: their other reports are held until tomorrow, or press Override` });
+}
+// The Override buttons, applied at the start of the next poll (the poll owns the state). A report is let through the user limit, or the
+// hourly limit is lifted for the rest of the hour.
+const overrides = [];
+export const requestOverride = (o) => { overrides.push(o); wake?.(); };
+function applyOverride(s, o) {
+  if (o.global) s.limitOverride = hourKey();
+  if (o.report) {
+    if (!(s.overrides ??= []).includes(o.report)) s.overrides.push(o.report);
+    const rows = readJson(changesFile(), []);
+    for (const r of rows) if (r.status === 'held' && r.reportId === o.report) r.overridden = true;
+    writeJson(changesFile(), rows);
+  }
+}
+
+// A subtitle problem is fixed by Bazarr, not by replacing the video: it deletes the item's subtitle files and searches again.
+// It counts toward the hourly limit like a replacement does. Returns false when the limit stopped it, else what to follow
+// (nothing: Bazarr searched by itself, so the item is already done).
+async function fixSubtitles(c, s, report, title, hit) {
+  const { a } = hit, base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file };
+  if (c.dryRun) return record({ status: 'dry-run', ...base, detail: 'would delete its subtitle files and have Bazarr search again' });
+  if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `hourly limit ${c.maxPerHour} reached: not refreshed` }); return false; }
+  s.count++;
+  countUser(c, s, report);
+  writeJson(stateFile(), s);
+  const done = [];
+  for (const m of c.subtitles ?? []) {
+    if (!SUBTITLES[m.kind]?.isConfigured(m)) continue;
+    const r = await SUBTITLES[m.kind].refresh(m, hit);
+    if (r) done.push(`${m.name}: ${r}`);
+  }
+  if (!done.length) return record({ status: 'skipped', ...base, detail: 'no subtitle manager knows this item' });
+  record({ status: 'replaced', ...base, detail: done.join('; ') });
+  return { arr: a.name, title, file: hit.file, stage: 'available' };
+}
 
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
 // Returns false when the hourly limit stopped it, else (outside dry-run) what to follow while the replacement arrives.
 async function swap(c, s, report, title, hit) {
+  if (hit.op === 'subtitles') return fixSubtitles(c, s, report, title, hit);
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = ARRS[a.kind].plan(hit);
-  const base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file };
+  const base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file, user: report.user?.name };
   const files = ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`;
   if (c.dryRun) return record({ status: 'dry-run', ...base, detail: `would delete ${files}, blocklist, search` });
   if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `hourly limit ${c.maxPerHour} reached: not replaced` }); return false; }
   s.count++;
+  countUser(c, s, report);
   writeJson(stateFile(), s); // counted before deleting: a crash must not let the cap be exceeded
   const hist = await arr(a, 'GET', plan.hist);
   const grabbed = (hist.records ?? hist)[0];
@@ -141,13 +197,22 @@ const context = (c, s) => ({
   locateFromPlex: (m, files, plexGet) => locateFromPlex(c, m, files, plexGet),
   locateIssue: (issue) => locateIssue(c, issue),
   swap: (report, title, hit) => swap(c, s, report, title, hit),
-  allowance: () => allowance(c, s),
+  allowance: (report) => allowance(c, s, report),
+  userRoom: (report) => userRoom(c, s, report),
+  // Not now: forget that the report was seen, so a later poll handles it again once it may (the row is logged once a day per report).
+  hold: (report, detail) => {
+    s.seen = s.seen.filter((id) => id !== report.id);
+    const day = dayKey();
+    if ((s.heldNoted ??= {})[report.id] !== day) { s.heldNoted[report.id] = day; record({ status: 'held', userLimit: true, reportId: report.id, user: report.user?.name, source: labelOf(report), detail }); }
+    writeJson(stateFile(), s);
+  },
+  hasSubtitles: () => (c.subtitles ?? []).some((m) => SUBTITLES[m.kind]?.isConfigured(m)),
   // Ask for this report to be finished (source.finish) once every item has its new file back; see checkPending.
   watch: (report, items, later = []) => {
     // later: files of this report the hourly limit did not leave room for. They wait here, slimmed down to what swap() needs,
     // and carry on as the limit resets (see resume()); the report is not finished until they are all through.
     const slim = ({ a, ep, movie, ...h }) => ({ ...h, arr: a.name, ...(ep && { ep: { id: ep.id } }), ...(movie && { movie: { id: movie.id } }) });
-    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, items,
+    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, user: report.user, items,
       backlog: later.map(slim), ...(later.length ? { hadBacklog: true } : {}), since: new Date().toISOString() });
     writeJson(stateFile(), s);
   },
@@ -178,8 +243,8 @@ const progressOf = (q) => {
 // Moves the items on as far as they have got; true when every one is available.
 // A report too big for this hour's limit carries on as the limit allows: the rest of its files wait in p.backlog.
 async function resume(c, s, p) {
-  const report = { id: p.reportId, kind: p.kind, source: p.source, src: c.sources.find((x) => x.name === p.source), issue: { id: p.ref, issueType: p.issueType } };
-  while (p.backlog.length && allowance(c, s) > 0) {
+  const report = { id: p.reportId, kind: p.kind, source: p.source, src: c.sources.find((x) => x.name === p.source), issue: { id: p.ref, issueType: p.issueType }, user: p.user };
+  while (p.backlog.length && allowance(c, s, report) > 0) {
     const h = p.backlog.shift(), a = c.arrs.find((x) => x.name === h.arr);
     if (!a) { record({ status: 'error', reportId: p.reportId, source: p.source, title: h.title, detail: `${h.arr} is no longer configured: ${h.title} was not replaced` }); continue; }
     try { const item = await swap(c, s, report, h.title, { ...h, a }); if (item) p.items.push(item); } catch (e) { record({ status: 'error', reportId: p.reportId, source: p.source, title: h.title, instance: a.name, detail: `${h.title} was not replaced: ${e.message}` }); }
@@ -361,6 +426,7 @@ export async function poll() {
   await checkArrs(c);
   if (!ok.size) throw new Error(errors.join('; '));
   const s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [], baseline: [] };
+  for (const o of overrides.splice(0)) applyOverride(s, o);
   s.sources ??= ['plex']; // state files from before Overseerr support only ever saw Plex
   s.baseline ??= legacyBaseline(nodes, s.seen, readJson(changesFile(), []));
   // a source seen for the first time (first run, or newly configured) is baselined: what it already holds is never acted on automatically

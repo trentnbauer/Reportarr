@@ -12,17 +12,18 @@ const e = process.env;
 if (e.MAX_PER_DAY && !e.MAX_PER_HOUR) log('MAX_PER_DAY is no longer used: the limit is per hour now. Set MAX_PER_HOUR (default 10).');
 
 const DEFAULTS = {
-  pollSeconds: 60, maxPerHour: 10, dryRun: true,
+  pollSeconds: 60, maxPerHour: 10, maxPerUserPerDay: 5, dryRun: true,
   hideLoginWarning: false, // hide the "No login is set" banner in the web UI
   // [{name, kind, url, ...}]: report sources (Plex, Overseerr/Seerr), *arr instances, download clients.
   // Each entry's kind names an integration; what an entry holds is declared by that integration.
   sources: [], arrs: [], clients: [],
   notifications: [], // Discord and email channels: where to tell people what happened
+  subtitles: [], // Bazarr instances: who fixes subtitle problems
 };
 const LIST_NAMES = Object.keys(LISTS);
 const mods = (list) => Object.values(LISTS[list]);
 // secret fields per list: never sent to the browser, and kept when the UI sends them blank
-const SECRET_FIELDS = { sources: ['key'], arrs: ['key'], clients: ['password', 'apiKey'], notifications: ['webhook', 'password'] };
+const SECRET_FIELDS = { sources: ['key'], arrs: ['key'], clients: ['password', 'apiKey'], notifications: ['webhook', 'password'], subtitles: ['key'] };
 
 // ---- the environment
 const fromEnvVars = {
@@ -32,9 +33,10 @@ const fromEnvVars = {
   // CLIENTS is a JSON list; the older single-client variables (QBIT_*, SAB_*) become one read-only default each
   clients: () => [...(e.CLIENTS ? JSON.parse(e.CLIENTS) : []), ...mods('clients').flatMap((m) => m.fromEnv(e))],
   notifications: () => mods('notifications').flatMap((m) => m.fromEnv(e)),
+  subtitles: () => mods('subtitles').flatMap((m) => m.fromEnv(e)),
 };
 const ENV = {
-  pollSeconds: e.POLL_SECONDS && +e.POLL_SECONDS, maxPerHour: e.MAX_PER_HOUR && +e.MAX_PER_HOUR,
+  pollSeconds: e.POLL_SECONDS && +e.POLL_SECONDS, maxPerHour: e.MAX_PER_HOUR && +e.MAX_PER_HOUR, maxPerUserPerDay: e.MAX_PER_USER_PER_DAY && +e.MAX_PER_USER_PER_DAY,
   dryRun: e.DRY_RUN && e.DRY_RUN !== 'false',
   hideLoginWarning: e.HIDE_LOGIN_WARNING && e.HIDE_LOGIN_WARNING !== 'false',
   ...Object.fromEntries(LIST_NAMES.map((l) => [l, fromEnvVars[l]()])),
@@ -68,7 +70,7 @@ export const getConfig = () => {
 // Secrets never leave the server; the UI only learns whether one is set.
 export function publicConfig() {
   const c = getConfig();
-  const out = { pollSeconds: c.pollSeconds, maxPerHour: c.maxPerHour, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
+  const out = { pollSeconds: c.pollSeconds, maxPerHour: c.maxPerHour, maxPerUserPerDay: c.maxPerUserPerDay, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
   for (const l of LIST_NAMES) {
     out[l] = c[l].map((x) => {
       const pub = { ...x };
@@ -80,7 +82,7 @@ export function publicConfig() {
 }
 
 // ---- saving
-const WHAT = { sources: 'source', arrs: 'instance', clients: 'download client', notifications: 'notification channel' };
+const WHAT = { sources: 'source', arrs: 'instance', clients: 'download client', notifications: 'notification channel', subtitles: 'subtitle manager' };
 const isUrl = (u) => /^https?:\/\//.test(u);
 
 export function validate(patch) {
@@ -103,6 +105,7 @@ export function validate(patch) {
   }
   if ('pollSeconds' in patch && !(Number.isInteger(+patch.pollSeconds) && +patch.pollSeconds >= 10 && +patch.pollSeconds <= 86400)) throw new Error('poll interval must be a whole number of seconds from 10 to 86400');
   if ('maxPerHour' in patch && !(Number.isInteger(+patch.maxPerHour) && +patch.maxPerHour >= 0 && +patch.maxPerHour <= 10000)) throw new Error('max replacements per hour must be a whole number from 0 to 10000');
+  if ('maxPerUserPerDay' in patch && !(Number.isInteger(+patch.maxPerUserPerDay) && +patch.maxPerUserPerDay >= 0 && +patch.maxPerUserPerDay <= 10000)) throw new Error('max replacements per user per day must be a whole number from 0 to 10000');
 }
 
 // the stored shape of an entry: an integration may define its own, otherwise all its fields are kept
@@ -119,6 +122,7 @@ export function saveConfig(patch) {
   const file = readFile(), cur = { ...file }, locked = new Set(lockedKeys());
   if ('pollSeconds' in patch && !locked.has('pollSeconds')) cur.pollSeconds = +patch.pollSeconds;
   if ('maxPerHour' in patch && !locked.has('maxPerHour')) cur.maxPerHour = +patch.maxPerHour;
+  if ('maxPerUserPerDay' in patch && !locked.has('maxPerUserPerDay')) cur.maxPerUserPerDay = +patch.maxPerUserPerDay;
   delete cur.maxPerDay; // the old per-day limit is not used any more
   for (const k of ['dryRun', 'hideLoginWarning']) if (k in patch && !locked.has(k)) cur[k] = !!patch[k];
   // only the UI-added entries are stored; the environment's stay in the environment
@@ -138,12 +142,12 @@ const q = (v) => {
 export function envFile(c = getConfig()) {
   const L = ['# Reportarr settings, exported from the web UI. Contains secrets: keep it private and never commit it.', '# Save as .env next to docker-compose.yml.', ''];
   const add = (k, v) => L.push(`${k}=${q(v)}`);
-  for (const l of ['sources', 'arrs', 'notifications']) {
+  for (const l of ['sources', 'arrs', 'notifications', 'subtitles']) {
     for (const m of mods(l)) {
       c[l].filter((x) => x.kind === m.kind).forEach((x, i) => { L.push('', `# ${x.name}`); for (const [k, v] of m.envLines(x, i + 1)) add(k, v); });
     }
   }
-  L.push(''); add('DRY_RUN', c.dryRun); add('POLL_SECONDS', c.pollSeconds); add('MAX_PER_HOUR', c.maxPerHour); add('HIDE_LOGIN_WARNING', c.hideLoginWarning);
+  L.push(''); add('DRY_RUN', c.dryRun); add('POLL_SECONDS', c.pollSeconds); add('MAX_PER_HOUR', c.maxPerHour); add('MAX_PER_USER_PER_DAY', c.maxPerUserPerDay); add('HIDE_LOGIN_WARNING', c.hideLoginWarning);
   if (c.clients.length) { L.push(''); add('CLIENTS', JSON.stringify(c.clients)); }
   L.push('', '# Not stored by the UI: set these yourself.', 'WEB_UI=8080', 'UI_USERNAME=', 'UI_PASSWORD=', '');
   return L.join('\n');
