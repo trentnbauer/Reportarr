@@ -58,7 +58,7 @@ test('any number of Plex servers and Overseerr/Seerr instances, from numbered va
   });
   assert.deepEqual(srcs(c), [['plex', 'plex', 'http://plex:32400'], ['family', 'plex', 'http://10.0.0.20:32400'], ['plex-10', 'plex', 'http://plex10:32400'],
     ['overseerr', 'seerr', 'http://seerr:5055'], ['seerr-4k', 'seerr', 'http://seerr2:5055']]);
-  assert.deepEqual([c.sources[3].issueTypes, c.sources[3].resolve, c.sources[4].issueTypes, c.sources[4].resolve], ['video,audio', false, 'video,audio,other', true]);
+  assert.deepEqual([c.sources[3].issueTypes, c.sources[3].resolve, c.sources[4].issueTypes, c.sources[4].resolve], ['video,audio', false, 'video,audio,subtitles,other', true]);
   assert.equal(c.sources[1].key, k.b);
   assert.ok(!locked.includes('sources'));
 });

@@ -18,11 +18,12 @@ const DEFAULTS = {
   // Each entry's kind names an integration; what an entry holds is declared by that integration.
   sources: [], arrs: [], clients: [],
   notifications: [], // Discord and email channels: where to tell people what happened
+  subtitles: [], // Bazarr instances: who fixes subtitle problems
 };
 const LIST_NAMES = Object.keys(LISTS);
 const mods = (list) => Object.values(LISTS[list]);
 // secret fields per list: never sent to the browser, and kept when the UI sends them blank
-const SECRET_FIELDS = { sources: ['key'], arrs: ['key'], clients: ['password', 'apiKey'], notifications: ['webhook', 'password'] };
+const SECRET_FIELDS = { sources: ['key'], arrs: ['key'], clients: ['password', 'apiKey'], notifications: ['webhook', 'password'], subtitles: ['key'] };
 
 // ---- the environment
 const fromEnvVars = {
@@ -32,6 +33,7 @@ const fromEnvVars = {
   // CLIENTS is a JSON list; the older single-client variables (QBIT_*, SAB_*) become one read-only default each
   clients: () => [...(e.CLIENTS ? JSON.parse(e.CLIENTS) : []), ...mods('clients').flatMap((m) => m.fromEnv(e))],
   notifications: () => mods('notifications').flatMap((m) => m.fromEnv(e)),
+  subtitles: () => mods('subtitles').flatMap((m) => m.fromEnv(e)),
 };
 const ENV = {
   pollSeconds: e.POLL_SECONDS && +e.POLL_SECONDS, maxPerHour: e.MAX_PER_HOUR && +e.MAX_PER_HOUR,
@@ -80,7 +82,7 @@ export function publicConfig() {
 }
 
 // ---- saving
-const WHAT = { sources: 'source', arrs: 'instance', clients: 'download client', notifications: 'notification channel' };
+const WHAT = { sources: 'source', arrs: 'instance', clients: 'download client', notifications: 'notification channel', subtitles: 'subtitle manager' };
 const isUrl = (u) => /^https?:\/\//.test(u);
 
 export function validate(patch) {
@@ -138,7 +140,7 @@ const q = (v) => {
 export function envFile(c = getConfig()) {
   const L = ['# Reportarr settings, exported from the web UI. Contains secrets: keep it private and never commit it.', '# Save as .env next to docker-compose.yml.', ''];
   const add = (k, v) => L.push(`${k}=${q(v)}`);
-  for (const l of ['sources', 'arrs', 'notifications']) {
+  for (const l of ['sources', 'arrs', 'notifications', 'subtitles']) {
     for (const m of mods(l)) {
       c[l].filter((x) => x.kind === m.kind).forEach((x, i) => { L.push('', `# ${x.name}`); for (const [k, v] of m.envLines(x, i + 1)) add(k, v); });
     }

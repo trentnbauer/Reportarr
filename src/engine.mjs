@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR, getConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
-import { SOURCES, ARRS, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
+import { SOURCES, ARRS, SUBTITLES, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
 import { notifyRow } from './notify.mjs';
@@ -49,6 +49,7 @@ export const currentHealth = (c) => Object.fromEntries([
   ...c.arrs.map((x) => [`arr:${x.name}`, health[`arr:${x.name}`]]),
   ...c.clients.map((x) => [`client:${x.name}`, health[`client:${x.name}`]]),
   ...c.notifications.map((x) => [`notification:${x.name}`, health[`notification:${x.name}`]]),
+  ...c.subtitles.map((x) => [`subtitle:${x.name}`, health[`subtitle:${x.name}`]]),
 ].filter(([, v]) => v));
 
 // a call to a Sonarr/Radarr/Lidarr instance, on the API version its kind uses
@@ -115,9 +116,30 @@ const capFull = (c, s) => {
 // How many more replacements this hour's limit allows (unlimited when none is set).
 const allowance = (c, s) => { if (!Number.isFinite(c.maxPerHour)) return Infinity; capFull(c, s); return Math.max(0, c.maxPerHour - (s.count ?? 0)); };
 
+// A subtitle problem is fixed by Bazarr, not by replacing the video: it deletes the item's subtitle files and searches again.
+// It counts toward the hourly limit like a replacement does. Returns false when the limit stopped it, else what to follow
+// (nothing: Bazarr searched by itself, so the item is already done).
+async function fixSubtitles(c, s, report, title, hit) {
+  const { a } = hit, base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file };
+  if (c.dryRun) return record({ status: 'dry-run', ...base, detail: 'would delete its subtitle files and have Bazarr search again' });
+  if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `hourly limit ${c.maxPerHour} reached: not refreshed` }); return false; }
+  s.count++;
+  writeJson(stateFile(), s);
+  const done = [];
+  for (const m of c.subtitles ?? []) {
+    if (!SUBTITLES[m.kind]?.isConfigured(m)) continue;
+    const r = await SUBTITLES[m.kind].refresh(m, hit);
+    if (r) done.push(`${m.name}: ${r}`);
+  }
+  if (!done.length) return record({ status: 'skipped', ...base, detail: 'no subtitle manager knows this item' });
+  record({ status: 'replaced', ...base, detail: done.join('; ') });
+  return { arr: a.name, title, file: hit.file, stage: 'available' };
+}
+
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
 // Returns false when the hourly limit stopped it, else (outside dry-run) what to follow while the replacement arrives.
 async function swap(c, s, report, title, hit) {
+  if (hit.op === 'subtitles') return fixSubtitles(c, s, report, title, hit);
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = ARRS[a.kind].plan(hit);
   const base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file };
   const files = ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`;
@@ -142,6 +164,7 @@ const context = (c, s) => ({
   locateIssue: (issue) => locateIssue(c, issue),
   swap: (report, title, hit) => swap(c, s, report, title, hit),
   allowance: () => allowance(c, s),
+  hasSubtitles: () => (c.subtitles ?? []).some((m) => SUBTITLES[m.kind]?.isConfigured(m)),
   // Ask for this report to be finished (source.finish) once every item has its new file back; see checkPending.
   watch: (report, items, later = []) => {
     // later: files of this report the hourly limit did not leave room for. They wait here, slimmed down to what swap() needs,

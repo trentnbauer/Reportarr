@@ -5,7 +5,7 @@ import { trim, get, work, pass, fail, need, envNumbers, signed } from '../util.m
 // Overseerr names issue types by number
 const ISSUE_TYPE = { 1: 'video', 2: 'audio', 3: 'subtitles', 4: 'other' };
 export const ISSUE_TYPES = Object.values(ISSUE_TYPE);
-const DEFAULT_TYPES = 'video,audio,other';
+const DEFAULT_TYPES = 'video,audio,subtitles,other';
 export const normalizeTypes = (v) => {
   const t = String(v ?? '').split(',').map((s) => s.trim().toLowerCase()).filter((s, i, a) => ISSUE_TYPES.includes(s) && a.indexOf(s) === i);
   return (t.length ? t : DEFAULT_TYPES.split(',')).join(',');
@@ -83,6 +83,8 @@ const seerr = {
     if (!(src.issueTypes ?? DEFAULT_TYPES).split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
       return record({ status: 'denied', ...base, detail: `${what}: ${type} issues are not set to be replaced` }); // refused by settings; Seerr is left alone, someone else may fix it
     }
+    const subs = type === 'subtitles'; // fixed by the subtitle manager (Bazarr), not by replacing the video
+    if (subs && !ctx.hasSubtitles()) return record({ status: 'denied', ...base, detail: `${what}: no subtitle manager (Bazarr) is set up to fix subtitle issues` });
     if (issue.media.mediaType === 'tv' && !issue.problemSeason && src.wholeSeries === false) {
       // Not replacing a whole series: close the issue and ask for the particular episode. Left alone (with a Retry) in a dry run, or when
       // resolving issues is off, since both mean "do not touch Seerr".
@@ -99,23 +101,28 @@ const seerr = {
     }
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
+    if (subs) for (const h of hits) h.op = 'subtitles';
     // As many files as this hour's limit allows now; the rest wait in the report's backlog and carry on as the limit resets.
     const room = c.dryRun ? hits.length : ctx.allowance();
     const later = [], items = [];
     for (const [i, hit] of hits.entries()) { if (i >= room) { later.push(hit); continue; } const done = await ctx.swap(report, hit.title, hit); if (done === false) later.push(hit); else if (done) items.push(done); }
-    if (c.dryRun || (src.resolve === false && !later.length)) return;
+    if (c.dryRun || (!items.length && !later.length) || (src.resolve === false && !later.length)) return; // nothing was done, or nothing to tell Seerr
     // The issue is resolved later, by finish(), once Sonarr/Radarr have the new file(s): Seerr tells the reporter when it is resolved.
     if (src.resolve !== false) {
       const total = items.length + later.length;
       try {
-        await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed(later.length
-          ? `Replaced ${items.length} of ${total} files so far; the rest follow as Reportarr's hourly limit allows. This issue will be resolved once all of the new files are imported.`
-          : `Replaced ${total} file(s) and started re-downloading ${total === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${total === 1 ? 'file is' : 'files are'} imported.`) });
+        await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed(subs
+          ? (later.length
+            ? `Refreshed the subtitles of ${items.length} of ${total} items so far; the rest follow as Reportarr's hourly limit allows. This issue will be resolved once all of them are done.`
+            : `Removed the subtitle files of ${total} item(s) and asked Bazarr to search for new ones. This issue is resolved; if the new subtitles are still wrong, report it again.`)
+          : later.length
+            ? `Replaced ${items.length} of ${total} files so far; the rest follow as Reportarr's hourly limit allows. This issue will be resolved once all of the new files are imported.`
+            : `Replaced ${total} file(s) and started re-downloading ${total === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${total === 1 ? 'file is' : 'files are'} imported.`) });
       } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment: ${e.message}` }); }
     }
     if (items.length || later.length) {
       ctx.watch(report, items, later);
-      record({ status: 'replacing', ...base, detail: `${what}: waiting for ${items.length} replacement file(s)${later.length ? ` and ${later.length} more to replace as the hourly limit allows` : ''} before resolving` });
+      record({ status: 'replacing', ...base, detail: subs ? `${what}: subtitles refreshed${later.length ? `, ${later.length} more as the hourly limit allows` : ''}` : `${what}: waiting for ${items.length} replacement file(s)${later.length ? ` and ${later.length} more to replace as the hourly limit allows` : ''} before resolving` });
     }
   },
 

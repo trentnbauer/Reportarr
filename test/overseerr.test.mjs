@@ -51,6 +51,24 @@ const overseerr = await listen((req, res) => {
   res.end();
 });
 
+// a Bazarr that knows one episode (Sonarr id 12): an external subtitle file and one inside the video; after the delete the language is missing
+const bazarrCalls = [];
+let bazarrDeleted = false;
+const bazarr = await listen((req, res) => {
+  const u = new URL(req.url, 'http://x');
+  bazarrCalls.push(`${req.method} ${u.pathname}${u.search.replace(/%5B%5D/g, '[]')}`);
+  res.setHeader('content-type', 'application/json');
+  if (req.headers['x-api-key'] !== KEY) return res.writeHead(401).end();
+  if (req.method === 'GET' && u.pathname === '/bazarr/api/episodes') {
+    if (u.searchParams.get('episodeid[]') !== '12') return res.end(JSON.stringify({ data: [] }));
+    return res.end(JSON.stringify({ data: [{ sonarrEpisodeId: 12, sonarrSeriesId: 3,
+      subtitles: [{ code2: 'en', forced: false, hi: false, path: '/tv/Show - S01E02.en.srt' }, { code2: 'en', forced: false, hi: true, path: null }],
+      missing_subtitles: bazarrDeleted ? [{ code2: 'en', forced: false, hi: false }] : [] }] }));
+  }
+  if (req.method === 'DELETE') bazarrDeleted = true;
+  res.writeHead(204).end();
+});
+const BZ = { name: 'bazarr', kind: 'bazarr', url: `http://127.0.0.1:${bazarr.address().port}/bazarr`, key: KEY };
 const SRC = { name: 'overseerr', kind: 'seerr', url: `http://127.0.0.1:${overseerr.address().port}/`, key: KEY, issueTypes: 'video,audio,other', resolve: true };
 const base = { dryRun: false, clients: [], sources: [SRC],
   arrs: [{ name: 'radarr', kind: 'radarr', url: `http://127.0.0.1:${radarr.address().port}`, key: 'k' }, { name: 'sonarr', kind: 'sonarr', url: `http://127.0.0.1:${sonarr.address().port}`, key: 'k' }] };
@@ -155,6 +173,29 @@ test('with whole series off, the issue is closed with a note asking for the part
   assert.equal(changes().at(-1).status, 'denied', 'refused by the setting even though Seerr was left alone');
 });
 
+test('a subtitle issue goes to Bazarr: the subtitle files are deleted and searched again, the video is left alone, and the issue is resolved', async () => {
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs, maxPerHour: 1000 });
+  issues = [];
+  const on = { ...base, subtitles: [BZ], sources: [{ ...SRC, issueTypes: 'video,audio,subtitles,other' }] };
+  bazarrDeleted = false; bazarrCalls.length = 0;
+  const w = await run(issue(60, tv, { issueType: 3, problemSeason: 1, problemEpisode: 2 }), on);
+  assert.ok(!w.some((c) => c.startsWith('DELETE sonarr')), 'the video is left alone');
+  assert.deepEqual(bazarrCalls.filter((c) => /^(DELETE|PATCH)/.test(c)), [
+    'DELETE /bazarr/api/episodes/subtitles?seriesid=3&episodeid=12&language=en&forced=False&hi=False&path=%2Ftv%2FShow%20-%20S01E02.en.srt',
+    'PATCH /bazarr/api/episodes/subtitles?seriesid=3&episodeid=12&language=en&forced=False&hi=False'], 'only the external file is deleted, then the missing language is searched');
+  assert.match(lastComment, /Removed the subtitle files of 1 item\(s\)/);
+  assert.match(lastComment, /— Reportarr \(automated system\)$/);
+  assert.match(changes().find((r) => r.reportId === 'overseerr:60' && r.status === 'replaced').detail, /deleted 1 subtitle file\(s\), asked Bazarr to search for 1 language\(s\)/);
+  calls.length = 0; await poll();
+  assert.ok(calls.includes('POST overseerr /api/v1/issue/60/resolved'), 'nothing to wait for: resolved on the next poll');
+  // an episode Bazarr does not know, and a setup with no Bazarr at all
+  assert.deepEqual(await run(issue(61, tv, { issueType: 3, problemSeason: 1, problemEpisode: 1 }), on), []);
+  assert.match(changes().at(-1).detail, /no subtitle manager knows this item/);
+  assert.deepEqual(await run(issue(62, tv, { issueType: 3, problemSeason: 1, problemEpisode: 2 }), { ...on, subtitles: [] }), []);
+  assert.equal(changes().at(-1).status, 'denied');
+  assert.match(changes().at(-1).detail, /no subtitle manager \(Bazarr\)/);
+});
+
 test('a report naming no season replaces every episode with a file, in every season', async () => {
   const w = (await run(issue(30, tv))).filter((c) => c.startsWith('DELETE'));
   assert.deepEqual(w, ['DELETE sonarr /api/v3/episodefile/101', 'DELETE sonarr /api/v3/episodefile/102', 'DELETE sonarr /api/v3/episodefile/103']);
@@ -231,4 +272,4 @@ test('a failed queue priority saved by an older version can still be retried', a
   assert.match(changes().at(-1).detail, /no longer in the queue/);
 });
 
-test.after(() => { for (const s of [radarr, sonarr, overseerr]) s.close(); });
+test.after(() => { for (const s of [radarr, sonarr, overseerr, bazarr]) s.close(); });

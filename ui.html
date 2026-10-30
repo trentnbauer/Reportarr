@@ -277,11 +277,11 @@ let hideDone = false;
 try { hideDone = localStorage.getItem('hideDone') === '1'; } catch {}
 let tab = 'activity', filter = 'all', view = 'log', query = '', lcOpen = new Set(), uid = 0;
 const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
-const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients'], ['notify', 'Notifications']];
-const LIST_OF = { sources: 'sources', arr: 'arrs', clients: 'clients', notify: 'notifications' }; // tab -> the list it edits
+const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients'], ['subtitles', 'Subtitles'], ['notify', 'Notifications']];
+const LIST_OF = { sources: 'sources', arr: 'arrs', clients: 'clients', subtitles: 'subtitles', notify: 'notifications' }; // tab -> the list it edits
 const LISTS = Object.values(LIST_OF);
 const K = () => state.kinds; // what each kind is called, its fields and defaults: sent by the server from its integrations
-const TARGET = { sources: 'source', arrs: 'arr', clients: 'client', notifications: 'notification' };
+const TARGET = { sources: 'source', arrs: 'arr', clients: 'client', notifications: 'notification', subtitles: 'subtitle' };
 const HKEY = TARGET;
 const locked = (k) => state.locked.includes(k);
 
@@ -489,6 +489,7 @@ const SECTIONS = {
   sources: ['Plex & Overseerr / Seerr', 'Where reports come from. Every instance is polled; a report is matched to whichever *arr owns the file.', 'Add at least one Plex or Overseerr / Seerr instance so Reportarr has reports to act on.'],
   arrs: ['Sonarr / Radarr / Lidarr', 'Environment instances are read-only. Ones you add are kept alongside them.', 'Add a Sonarr, Radarr or Lidarr instance so Reportarr has somewhere to replace files.'],
   clients: ['Download clients', 'Moves replacements to the top of the queue. Matched to the client Sonarr/Radarr uses by host:port, or name.', 'No download clients. Replacements are still searched, just not moved to the top of the queue.'],
+  subtitles: ['Subtitles (Bazarr)', 'Fixes subtitle problems. When someone reports a subtitle issue, Reportarr deletes that item\'s subtitle files and has Bazarr search again (the item\'s video is left alone). Subtitle issues count toward the hourly limit.', 'No subtitle manager. Subtitle issues are denied until you add Bazarr (use its URL including any base path, such as /bazarr, and its API key from Settings, General).'],
   notifications: ['Discord & email', 'Tells you when Reportarr replaces a file, a report fails, or the hourly limit is reached. Each channel picks its own events.', 'No notification channels. Add Discord or SMTP email to hear about replacements and failures.'],
 };
 function renderPanel() {
