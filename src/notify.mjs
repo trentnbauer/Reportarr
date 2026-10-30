@@ -48,7 +48,7 @@ export async function flush(event) {
   const q = queue.get(event);
   if (!q) return;
   queue.delete(event); clearTimeout(q.timer);
-  const msg = compose(event, q.items);
+  const msg = { ...compose(event, q.items), server: getConfig().serverName };
   await Promise.allSettled(getConfig().notifications
     .filter((ch) => NOTIFIERS[ch.kind]?.isConfigured(ch) && wants(ch, event))
     .map((ch) => NOTIFIERS[ch.kind].send(ch, msg).catch((e) => log('notification', ch.name, 'failed:', why(e)))));
@@ -60,7 +60,7 @@ export const flushAll = () => Promise.all([...queue.keys()].map(flush));
 export function notifyReporter(r) {
   if (!r.reporterEmail || !r.notice) return Promise.resolve();
   try {
-    const msg = { event: 'reporter', to: [r.reporterEmail], title: `${r.outcome}${r.title ? `: ${r.title}` : ''}`,
+    const msg = { event: 'reporter', server: getConfig().serverName, to: [r.reporterEmail], title: `${r.outcome}${r.title ? `: ${r.title}` : ''}`,
       lines: [`${r.outcome} - ${r.notice}`, ...(r.title ? [`About: ${r.title}`] : []), ...(r.link ? [`Your report: ${r.link}`] : [])] };
     return Promise.allSettled(getConfig().notifications
       .filter((ch) => ch.kind === 'smtp' && ch.toReporter === true && NOTIFIERS.smtp.isConfigured(ch))
