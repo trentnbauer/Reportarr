@@ -287,7 +287,7 @@ async function act(c, s, r) {
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
 // redoing the report could delete the new download); any other failure runs the report again, through the daily cap.
 // Older versions saved a failed priority row without a retry field; its message gives it away.
-const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series/.test(r.detail ?? '') ? 'report' : undefined);
+const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)/.test(r.detail ?? '') ? 'report' : undefined);
 
 async function retry(c, s, nodes, id) {
   const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id), kind = row && retryKind(row);

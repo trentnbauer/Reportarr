@@ -84,7 +84,18 @@ const seerr = {
       return record({ status: 'skipped', ...base, detail: `${what}: ${type} issues are not set to be replaced` });
     }
     if (issue.media.mediaType === 'tv' && !issue.problemSeason && src.wholeSeries === false) {
-      return record({ status: 'skipped', ...base, retry: 'report', detail: `${what}: reported against the whole series; turn on "Replace whole series" to replace it` });
+      // Not replacing a whole series: close the issue and ask for the particular episode. Left alone (with a Retry) in a dry run, or when
+      // resolving issues is off, since both mean "do not touch Seerr".
+      let closed = false;
+      if (!c.dryRun && src.resolve !== false) {
+        try {
+          await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed("A report against the whole series can't be replaced automatically. Please report the particular episode that has the problem (open it and choose Report an issue there) and it will be replaced.") });
+          await api(src, 'POST', `/issue/${issue.id}/resolved`);
+          closed = true;
+        } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); }
+      }
+      return record({ status: closed ? 'denied' : 'skipped', ...base, ...(closed ? {} : { retry: 'report' }),
+        detail: closed ? `${what}: reported against the whole series; closed it and asked for the particular episode` : `${what}: reported against the whole series ("Replace whole series" is off)` });
     }
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
