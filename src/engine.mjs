@@ -19,7 +19,7 @@ export const changesFile = () => dataFile('changes.json');
 
 export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [], backlog: [] };
 // Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
-// *arr instances every few minutes, download clients only when you press Test (logging in over and over can get you banned).
+// *arr instances every few minutes, download clients and Bazarr gently (see checkLogins). Notification channels only when you press Test: it sends a message.
 export const health = {};
 const ARR_CHECK_MS = 5 * 60_000;
 let lastArrCheck = 0;
@@ -417,6 +417,24 @@ async function checkArrs(c) {
   c.arrs.forEach((a, i) => { health[`arr:${a.name}`] = { ok: results[i].ok, message: results[i].message, at: new Date().toISOString() }; });
 }
 
+// Download clients and Bazarr need a login or a key, and a few wrong logins get an address banned (qBittorrent does it), so they are
+// checked gently: at startup, then every few minutes, and never again after a refused login until their address or credentials change.
+// shortcut: checked one after the other, each can take up to its 10 s timeout when down; fine every 10 minutes, run them together if the list grows.
+const LOGIN_CHECK_MS = 10 * 60_000;
+const loginChecks = new Map(); // "client:NAME" -> { sig, at, refused }
+export async function checkLogins(c, now = Date.now()) {
+  for (const [target, list] of [['client', c.clients], ['subtitle', c.subtitles ?? []]]) {
+    for (const x of list) {
+      if (!x.url) continue; // a default download client takes its address from the *arr
+      const k = `${target}:${x.name}`, sig = crypto.createHash('sha1').update([x.url, x.username, x.password, x.apiKey, x.key].join('\0')).digest('hex'), prev = loginChecks.get(k);
+      if (prev?.sig === sig && (prev.refused || now - prev.at < LOGIN_CHECK_MS)) continue;
+      const r = await runCheck(c, { target, kind: x.kind, name: x.name, url: x.url, key: '', username: '', password: '', apiKey: '' }); // blank secrets use the saved ones
+      health[k] = { ok: r.ok, message: r.message, at: new Date().toISOString() };
+      loginChecks.set(k, { sig, at: now, refused: !r.ok && /was refused \(HTTP|username or password/.test(r.message) }); // not "connection refused": a client that is down is tried again
+    }
+  }
+}
+
 export async function poll() {
   const c = getConfig();
   if (!c.sources.some((s) => SOURCES[s.kind].isConfigured(s)) || !c.arrs.length) {
@@ -424,6 +442,7 @@ export async function poll() {
   }
   const { nodes, ok, errors } = await fetchSources(c);
   await checkArrs(c);
+  await checkLogins(c);
   if (!ok.size) throw new Error(errors.join('; '));
   const s = readJson(stateFile(), null) ?? { seen: [], day: '', count: 0, sources: [], baseline: [] };
   for (const o of overrides.splice(0)) applyOverride(s, o);
