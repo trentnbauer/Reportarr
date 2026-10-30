@@ -374,7 +374,7 @@ function paintActivity() {
   $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
   $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
   $('lifecycle').classList.toggle('hidden', view !== 'report');
-  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Finished hidden' : 'Hide finished'; $('hidedone').title = 'Leaves out reports that are resolved, skipped or denied: nothing more will happen to them';
+  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed'; $('hidedone').title = 'Leaves out reports that are resolved, skipped or denied: nothing more will happen to them';
   if (view === 'report') { paintLifecycle(); return; }
   const q = query.trim().toLowerCase();
   const done = hideDone ? new Set(lifecycles().filter(finished).map((x) => x.id)) : new Set(); // reports that are finished
@@ -477,6 +477,9 @@ function card(list, x) {
   const env = !!x.fromEnv, meta = K()[list][x.kind];
   // only a new card chooses its type; a saved one shows it in the header (change it by removing and adding again)
   const type = x.isNew && !env ? `<label class="f">Type<select data-list="${list}" data-id="${x._id}" data-f="kind">${Object.entries(K()[list]).map(([k, m]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>` : '';
+  // a template (a provider's host, port and TLS) when the kind has some
+  const tp = meta.templates ?? [], cur = tp.find((p) => p.key === x.template);
+  const tmpl = tp.length ? `<label class="f">Template<select data-list="${list}" data-id="${x._id}" data-template ${env ? 'disabled' : ''}><option value="">Custom</option>${tp.map((p) => `<option value="${p.key}" ${x.template === p.key ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select><span class="hint">${esc(cur?.note ?? 'Pick a provider to fill in its host, port and TLS.')}</span></label>` : '';
   const f = (label, name, t, o = {}) => field(label, t ?? 'text', x[name], { dis: env, attrs: `data-list="${list}" data-id="${x._id}" data-f="${name}"`, ...o });
   const nameField = f('Name', 'name', 'text', { dis: env || !x.isNew });
   const fields = meta.fields.map((fd) => f(fd.label, fd.name, fd.type, {
@@ -487,7 +490,7 @@ function card(list, x) {
   return `<div class="icard" data-card="${x._id}">
     <div class="ihead"><div class="l"><span class="dot ${cardDot(list, x)}" data-dot="${list}:${esc(x.name)}:${x._id}"></span><b>${esc(x.name)}</b><span class="kind">${esc(meta.label)}</span>${env ? '<span class="env">env</span>' : ''}${x.default ? '<span class="env" title="used for any client of this kind that is not matched by address">default</span>' : ''}</div>
       <div class="r" data-res="${x._id}">${res(x)}<button type="button" class="btn sm" data-test="${list}" data-id="${x._id}">Test</button>${env ? '' : `<button type="button" class="btn sm danger" data-remove="${list}" data-id="${x._id}">Remove</button>`}</div></div>
-    <div class="fields">${type}${nameField}${fields}</div>${extra ? `<div class="switches">${extra}</div>` : ''}</div>`;
+    <div class="fields">${type}${nameField}${tmpl}${fields}</div>${extra ? `<div class="switches">${extra}</div>` : ''}</div>`;
 }
 
 const SECTIONS = {
@@ -546,6 +549,12 @@ $('panel').addEventListener('input', (e) => {
 });
 $('panel').addEventListener('change', (e) => {
   const t = e.target;
+  if (t.dataset.template !== undefined) { // choosing a template fills in its host, port and TLS
+    const x = find(t.dataset.list, t.dataset.id), p = (K()[t.dataset.list][x.kind].templates ?? []).find((q) => q.key === t.value);
+    x.template = t.value;
+    if (p) Object.assign(x, { host: p.host, port: p.port, tls: p.tls });
+    markDirty(); renderPanel(); return;
+  }
   if (t.dataset.f !== 'kind') return;
   const x = find(t.dataset.list, t.dataset.id); x.kind = t.value;
   if (x.isNew) { const m = K()[t.dataset.list][x.kind]; x.name = freeName(t.dataset.list, x.kind, x._id); x.url = m.defaultUrl; for (const [k, v] of Object.entries(m.defaults)) x[k] ??= v; }

@@ -188,4 +188,35 @@ test('a broken channel never stops anything', async () => {
   await assert.doesNotReject(flushAll());
 });
 
+test('SMTP templates: each is complete, and picking one by name fills in the host, port and TLS', () => {
+  const keys = smtp.templates.map((t) => t.key);
+  assert.equal(new Set(keys).size, keys.length, 'no template twice');
+  for (const t of smtp.templates) {
+    assert.ok(t.label && t.note, `${t.key} has a name and a note`);
+    assert.ok(Number.isInteger(+t.port) && +t.port > 0 && +t.port < 65536, `${t.key} has a port`);
+    if (+t.port === 465) assert.equal(t.tls, true, `${t.key}: 465 is implicit TLS`);
+  }
+  const gmail = smtp.templates.find((t) => t.key === 'gmail');
+  assert.deepEqual([gmail.host, gmail.port, gmail.tls], ['smtp.gmail.com', '587', true]);
+});
+
+test('SMTP_TEMPLATE in the environment: the template fills in what is not set, explicit settings win, numbered ones work, an unknown name is ignored', () => {
+  const one = (env) => smtp.fromEnv(env).map((x) => [x.name, x.template, x.host, x.port, x.tls]);
+  assert.deepEqual(one({ SMTP_TEMPLATE: 'Gmail', SMTP_FROM: 'a@b.c' }), [['email', 'gmail', 'smtp.gmail.com', '587', true]], 'a template alone is a channel; the name is not case-sensitive');
+  assert.deepEqual(one({ SMTP_TEMPLATE: 'yahoo' }), [['email', 'yahoo', 'smtp.mail.yahoo.com', '465', true]]);
+  assert.deepEqual(one({ SMTP_TEMPLATE: 'gmail', SMTP_HOST: 'proxy.local', SMTP_PORT: '2525', SMTP_TLS: 'false' }), [['email', 'gmail', 'proxy.local', '2525', false]], 'explicit settings win');
+  assert.deepEqual(one({ SMTP_2_TEMPLATE: 'sendgrid', SMTP_2_NAME: 'work' }), [['work', 'sendgrid', 'smtp.sendgrid.net', '587', true]]);
+  assert.deepEqual(one({ SMTP_TEMPLATE: 'nonsense', SMTP_HOST: 'h' }), [['email', '', 'h', '587', true]], 'an unknown template is ignored');
+  assert.deepEqual(one({}), []);
+});
+
+test('the template is saved with the channel, shown to the UI, and exported to .env', () => {
+  saveConfig({ notifications: [{ ...SMTP, name: 'gmail-1', template: 'gmail', host: 'smtp.gmail.com', port: '587', tls: true }] });
+  assert.equal(getConfig().notifications.find((x) => x.name === 'gmail-1').template, 'gmail');
+  assert.match(envFile(), /^SMTP_\d+_TEMPLATE=gmail$/m);
+  saveConfig({ notifications: [{ ...SMTP, name: 'gmail-1', template: 'bogus' }] });
+  assert.equal(getConfig().notifications.find((x) => x.name === 'gmail-1').template, '', 'an unknown template is not stored');
+  saveConfig({ notifications: [] });
+});
+
 test.after(() => { discordServer.close(); smtpServer.close(); });

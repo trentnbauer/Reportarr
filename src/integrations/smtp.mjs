@@ -81,10 +81,32 @@ export async function sendMail(o) {
   } finally { sock.destroy(); }
 }
 
-const entry = (name, v) => ({ name, kind: 'smtp', host: v('HOST') ?? '', port: v('PORT') ?? '587', username: v('USERNAME') ?? '', password: v('PASSWORD') ?? '', from: v('FROM') ?? '', to: v('TO') ?? '', tls: v('TLS') !== 'false', ...eventFlags(v('EVENTS')) });
+// Templates for common providers: pick one and the host, port and TLS are filled in. Written from each provider's documentation as
+// known when this was written, so check yours. 465 is implicit TLS, 587 is STARTTLS (see sendMail).
+const TEMPLATES = [
+  { key: 'gmail', label: 'Gmail', host: 'smtp.gmail.com', port: '587', tls: true, note: 'Username is your full address. Use an App Password (Google Account, Security, 2-Step Verification, App passwords): your normal password will not work.' },
+  { key: 'outlook', label: 'Outlook / Microsoft 365', host: 'smtp.office365.com', port: '587', tls: true, note: 'Username is your full address. Microsoft is retiring basic-auth SMTP: it may need enabling for the mailbox, or use another provider.' },
+  { key: 'yahoo', label: 'Yahoo Mail', host: 'smtp.mail.yahoo.com', port: '465', tls: true, note: 'Use an app password (Account Security, Generate app password).' },
+  { key: 'icloud', label: 'iCloud Mail', host: 'smtp.mail.me.com', port: '587', tls: true, note: 'Username is your iCloud address. Use an app-specific password (appleid.apple.com).' },
+  { key: 'fastmail', label: 'Fastmail', host: 'smtp.fastmail.com', port: '465', tls: true, note: 'Use an app password (Settings, Privacy & Security, Integrations).' },
+  { key: 'zoho', label: 'Zoho Mail', host: 'smtp.zoho.com', port: '465', tls: true, note: 'Use an application-specific password if two-factor is on. Other regions: smtp.zoho.eu, smtp.zoho.com.au.' },
+  { key: 'proton', label: 'Proton Mail', host: 'smtp.protonmail.ch', port: '587', tls: true, note: 'Needs a paid plan and an SMTP token (Settings, IMAP/SMTP, SMTP tokens) as the password.' },
+  { key: 'sendgrid', label: 'SendGrid', host: 'smtp.sendgrid.net', port: '587', tls: true, note: 'Username is the word apikey; the password is an API key with Mail Send permission.' },
+  { key: 'mailgun', label: 'Mailgun', host: 'smtp.mailgun.org', port: '587', tls: true, note: "Username is postmaster@your-domain and the password is that domain's SMTP password (EU: smtp.eu.mailgun.org)." },
+  { key: 'brevo', label: 'Brevo', host: 'smtp-relay.brevo.com', port: '587', tls: true, note: 'Username is your Brevo login; the password is an SMTP key.' },
+  { key: 'ses', label: 'Amazon SES', host: 'email-smtp.us-east-1.amazonaws.com', port: '587', tls: true, note: 'Change the region in the host to yours. Username and password are SMTP credentials (not your AWS keys) and the From address must be verified.' },
+  { key: 'relay', label: 'Local relay (no login)', host: '', port: '25', tls: false, note: 'A mail relay on your network that needs no login: set the host and leave the username blank.' },
+];
+const template = (key) => TEMPLATES.find((t) => t.key === String(key ?? '').trim().toLowerCase());
+// explicit settings win over the template; the template fills in what is left
+const entry = (name, v) => {
+  const t = template(v('TEMPLATE'));
+  return { name, kind: 'smtp', template: t?.key ?? '', host: v('HOST') ?? t?.host ?? '', port: v('PORT') ?? t?.port ?? '587', username: v('USERNAME') ?? '', password: v('PASSWORD') ?? '', from: v('FROM') ?? '', to: v('TO') ?? '',
+    tls: v('TLS') !== undefined ? v('TLS') !== 'false' : t?.tls ?? true, ...eventFlags(v('EVENTS')) };
+};
 
 const smtp = {
-  kind: 'smtp', label: 'SMTP email', prefix: 'email',
+  kind: 'smtp', label: 'SMTP email', prefix: 'email', templates: TEMPLATES,
   fields: [
     { name: 'host', label: 'Host' },
     { name: 'port', label: 'Port', type: 'number', hint: '587 for STARTTLS, 465 for TLS' },
@@ -96,15 +118,15 @@ const smtp = {
   switches: [{ name: 'tls', label: 'Use TLS', hint: 'STARTTLS or implicit TLS, by port' }, ...eventSwitches],
   defaults: { host: '', port: '587', username: '', password: '', from: '', to: '', tls: true },
 
-  // SMTP_HOST (+ SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM, SMTP_TO, SMTP_TLS, SMTP_EVENTS, SMTP_NAME) is one channel;
+  // SMTP_TEMPLATE=gmail fills in the host, port and TLS for a common provider (see TEMPLATES). SMTP_HOST (+ SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM, SMTP_TO, SMTP_TLS, SMTP_EVENTS, SMTP_NAME) is one channel;
   // SMTP_2_HOST ... are more
   fromEnv(e) {
     const out = [];
-    if (e.SMTP_HOST) out.push(entry(e.SMTP_NAME || 'email', (k) => e[`SMTP_${k}`]));
-    for (const n of envIndexes(e, 'SMTP', 'HOST')) out.push(entry(e[`SMTP_${n}_NAME`] || `email-${n}`, (k) => e[`SMTP_${n}_${k}`]));
+    if (e.SMTP_HOST || e.SMTP_TEMPLATE) out.push(entry(e.SMTP_NAME || 'email', (k) => e[`SMTP_${k}`]));
+    for (const n of [...new Set([...envIndexes(e, 'SMTP', 'HOST'), ...envIndexes(e, 'SMTP', 'TEMPLATE')])].sort((a, b) => a - b)) out.push(entry(e[`SMTP_${n}_NAME`] || `email-${n}`, (k) => e[`SMTP_${n}_${k}`]));
     return out;
   },
-  envLines: (s, n) => [['NAME', s.name], ['HOST', s.host], ['PORT', s.port], ['USERNAME', s.username], ['PASSWORD', s.password], ['FROM', s.from], ['TO', s.to], ['TLS', s.tls !== false], ['EVENTS', eventsLine(s)]].map(([k, v]) => [`SMTP_${n}_${k}`, v]),
+  envLines: (s, n) => [['NAME', s.name], ['TEMPLATE', s.template ?? ''], ['HOST', s.host], ['PORT', s.port], ['USERNAME', s.username], ['PASSWORD', s.password], ['FROM', s.from], ['TO', s.to], ['TLS', s.tls !== false], ['EVENTS', eventsLine(s)]].map(([k, v]) => [`SMTP_${n}_${k}`, v]),
   validate(x) {
     if (!x.host) return 'needs a host';
     if (x.port && !(Number.isInteger(+x.port) && +x.port >= 1 && +x.port <= 65535)) return 'the port must be a number from 1 to 65535';
@@ -114,7 +136,7 @@ const smtp = {
     return '';
   },
   normalize: (s, old) => ({
-    name: s.name, kind: 'smtp', host: String(s.host ?? '').trim(), port: String(s.port || '587'), username: String(s.username ?? '').trim(), password: s.password || old?.password || '',
+    name: s.name, kind: 'smtp', template: template(s.template)?.key ?? '', host: String(s.host ?? '').trim(), port: String(s.port || '587'), username: String(s.username ?? '').trim(), password: s.password || old?.password || '',
     from: String(s.from ?? '').trim(), to: addresses(s.to).join(', '), tls: s.tls !== false, ...flagsOf(s),
   }),
   isConfigured: (s) => !!(s.host && ADDRESS.test(s.from ?? '') && addresses(s.to).length),

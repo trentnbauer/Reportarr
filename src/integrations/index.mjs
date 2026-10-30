@@ -25,5 +25,5 @@ export const LISTS = { sources: SOURCES, arrs: ARRS, clients: CLIENTS, notificat
 
 // What the web UI needs to draw a card for any kind, so it hard-codes no app names.
 export const kindsMeta = () => Object.fromEntries(Object.entries(LISTS).map(([list, mods]) => [list, Object.fromEntries(Object.values(mods).map((m) => [m.kind, {
-  label: m.label, prefix: m.prefix, defaultUrl: m.defaultUrl, fields: m.fields, switches: m.switches ?? [], defaults: m.defaults ?? {},
+  label: m.label, prefix: m.prefix, defaultUrl: m.defaultUrl, fields: m.fields, switches: m.switches ?? [], defaults: m.defaults ?? {}, templates: m.templates ?? [],
 }]))]));
