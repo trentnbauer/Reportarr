@@ -26,10 +26,10 @@ const radarr = await listen((q, s) => { const u = new URL(q.url, 'http://x'); js
 // the files an older version left behind
 fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({
   plexUrl: `http://127.0.0.1:${plex.address().port}`, plexToken: tok, overseerrUrl: `http://127.0.0.1:${seerr.address().port}`, overseerrKey: seerrKey, overseerrTypes: 'video', overseerrResolve: true,
-  qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: rnd(), dryRun: true, maxPerDay: 48,
+  qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: rnd(), dryRun: true, maxPerHour: 48,
   arrs: [{ name: 'radarr', kind: 'radarr', url: `http://127.0.0.1:${radarr.address().port}`, key: 'k' }],
 }));
-fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ seen: ['seen-1', 'seen-2'], day: new Date().toISOString().slice(0, 10), count: 4, sources: ['plex', 'overseerr'] }));
+fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ seen: ['seen-1', 'seen-2'], hour: new Date().toISOString().slice(0, 13), count: 4, sources: ['plex', 'overseerr'] }));
 fs.writeFileSync(path.join(data, 'changes.json'), JSON.stringify([{ time: '2026-10-28T00:00:00Z', status: 'replaced', reportId: 'seen-1', title: 'Old Film', detail: 'x' }]));
 
 const { poll } = await import('../src/engine.mjs');
@@ -55,7 +55,7 @@ test('a report that arrives after the upgrade is handled normally', async () => 
   await poll();
   const last = changes().at(-1);
   assert.deepEqual([last.status, last.reportId, last.source, last.instance], ['dry-run', 'after-upgrade', 'Plex report', 'radarr']);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')).count, 4, 'a dry run does not use up the daily cap');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')).count, 4, 'a dry run does not use up the hourly limit');
 });
 
 test.after(() => { for (const s of [community, plex, seerr, radarr]) s.close(); });

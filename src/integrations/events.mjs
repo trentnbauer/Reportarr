@@ -4,7 +4,7 @@ export const EVENTS = [
   { name: 'onReplaced', event: 'replaced', label: 'Replacements', hint: 'When a file is deleted and searched again' },
   { name: 'onFailed', event: 'failed', label: 'Failures', hint: 'When a report or connection fails' },
   { name: 'onResolved', event: 'resolved', label: 'Resolved', hint: 'When the new file is in Plex' },
-  { name: 'onCap', event: 'cap', label: 'Daily cap reached', hint: 'When MAX_PER_DAY is hit' },
+  { name: 'onCap', event: 'cap', label: 'Hourly limit reached', hint: 'When MAX_PER_HOUR is hit' },
 ];
 export const eventSwitches = EVENTS.map(({ name, label, hint }) => ({ name, label, hint }));
 export const wants = (channel, event) => channel[EVENTS.find((x) => x.event === event).name] !== false;

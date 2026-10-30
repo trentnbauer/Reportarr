@@ -9,7 +9,7 @@ import { log, why } from './util.mjs';
 const WAIT_MS = 5000;
 const MAX_LINES = 20;
 const queue = new Map(); // event -> { items: [log rows], timer }
-let capDay = '';
+let capHour = '';
 
 // What a log row means to a notification channel, if anything.
 export function eventOf(r) {
@@ -17,15 +17,15 @@ export function eventOf(r) {
   if (r.status === 'replaced') return 'replaced';
   if (r.status === 'resolved') return 'resolved';
   if (r.status === 'error') return /^priority failed/.test(detail) ? undefined : 'failed'; // a queue priority that did not work is not worth a message
-  if ((r.status === 'info' || r.status === 'skipped') && /daily cap/i.test(detail)) {
-    const day = new Date().toISOString().slice(0, 10);
-    if (capDay === day) return; // once a day
-    capDay = day;
+  if ((r.status === 'info' || r.status === 'skipped') && /hourly limit|daily cap/i.test(detail)) {
+    const hour = new Date().toISOString().slice(0, 13);
+    if (capHour === hour) return; // once an hour
+    capHour = hour;
     return 'cap';
   }
 }
 
-const HEAD = { replaced: 'Replaced', failed: 'Failed', resolved: 'Resolved', cap: 'Daily cap reached' };
+const HEAD = { replaced: 'Replaced', failed: 'Failed', resolved: 'Resolved', cap: 'Hourly limit reached' };
 const lineOf = (event, r) => {
   if (event === 'replaced') return `${r.title ?? r.source ?? 'A file'}${r.instance ? ` on ${r.instance}` : ''}${r.file ? ` (${r.file})` : ''}`;
   if (event === 'failed') return `${r.title ? `${r.title}: ` : ''}${r.detail ?? 'something went wrong'}${r.source ? ` (${r.source})` : ''}`;
