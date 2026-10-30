@@ -30,6 +30,20 @@ const userOf = (issue, src) => {
 
 // What the reporter is told when their report is completed: the outcome and the reason (the log keeps these; the address is only used to
 // email them, and never in a dry run).
+// The address people use for Seerr, for the links in emails (Reportarr itself may reach Seerr by an internal one). In order: the source's own
+// Public URL setting, Seerr's own Application URL (read from its settings, at most once an hour), then the address Reportarr uses.
+const appUrls = new Map(); // seerr address -> { url, at }
+const web = (u) => (/^https?:\/\//.test(String(u ?? '').trim()) ? trim(u) : '');
+const publicBase = (src) => web(src.publicUrl) || web(appUrls.get(trim(src.url))?.url) || trim(src.url);
+async function loadAppUrl(src) {
+  if (web(src.publicUrl)) return;
+  const k = trim(src.url), hit = appUrls.get(k);
+  if (hit && Date.now() - hit.at < 3600_000) return;
+  let url = '';
+  try { url = (await api(src, 'GET', '/settings/main'))?.applicationUrl ?? ''; } catch { /* reading it needs an admin key: fall back to the address above */ }
+  appUrls.set(k, { url, at: Date.now() });
+}
+
 const SERIES_NOTE = "A report against the whole series can't be replaced automatically. Please report the particular episode that has the problem (open it and choose Report an issue there) and it will be replaced.";
 const NO_FILE_NOTE = 'No file was found for this title, so there is nothing for Reportarr to replace. If the title should be in the library, please ask the server owner.';
 // Close an issue with a (signed) note: the comment, then resolve it. If either fails the error is thrown and the issue stays open.
@@ -38,7 +52,7 @@ const close = async (src, issue, note) => {
   await api(src, 'POST', `/issue/${issue.id}/resolved`);
 };
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
-const tell = (c, report, outcome, notice, email = true) => ({ outcome, notice, link: `${trim(report.src.url)}/issues/${report.issue.id}`, userName: report.user?.name, issueType: cap(ISSUE_TYPE[report.issue.issueType]), reportedAt: report.issue.createdAt, ...(email && report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
+const tell = (c, report, outcome, notice, email = true) => ({ outcome, notice, link: `${publicBase(report.src)}/issues/${report.issue.id}`, userName: report.user?.name, issueType: cap(ISSUE_TYPE[report.issue.issueType]), reportedAt: report.issue.createdAt, ...(email && report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
 
 const seerr = {
   kind: 'seerr', label: 'Overseerr / Seerr', prefix: 'seerr', defaultUrl: 'http://overseerr:5055',
@@ -46,6 +60,7 @@ const seerr = {
     { name: 'url', label: 'URL' },
     { name: 'key', label: 'API key', type: 'password', set: 'keySet', hint: 'Settings → General' },
     { name: 'issueTypes', label: 'Issue types to replace', hint: 'video, audio, subtitles, other' },
+    { name: 'publicUrl', label: 'Public URL', hint: "For the links in emails. Blank: Seerr's own Application URL (Settings, General), else the URL above" },
   ],
   switches: [
     { name: 'resolve', label: 'Resolve issues', hint: 'Comment after replacing, resolve once the new file is imported' },
@@ -56,20 +71,20 @@ const seerr = {
   // OVERSEERR_URL + OVERSEERR_KEY is one instance; OVERSEERR_2_URL / _KEY / _NAME / _ISSUE_TYPES / _RESOLVE are more
   fromEnv(e) {
     const out = [];
-    if (e.OVERSEERR_URL) out.push({ name: e.OVERSEERR_NAME || 'overseerr', kind: 'seerr', url: trim(e.OVERSEERR_URL), key: e.OVERSEERR_KEY || e.OVERSEERR_API_KEY || '', issueTypes: normalizeTypes(e.OVERSEERR_ISSUE_TYPES), resolve: e.OVERSEERR_RESOLVE !== 'false', wholeSeries: e.OVERSEERR_WHOLE_SERIES !== 'false' });
+    if (e.OVERSEERR_URL) out.push({ name: e.OVERSEERR_NAME || 'overseerr', kind: 'seerr', url: trim(e.OVERSEERR_URL), key: e.OVERSEERR_KEY || e.OVERSEERR_API_KEY || '', issueTypes: normalizeTypes(e.OVERSEERR_ISSUE_TYPES), resolve: e.OVERSEERR_RESOLVE !== 'false', wholeSeries: e.OVERSEERR_WHOLE_SERIES !== 'false', publicUrl: trim(e.OVERSEERR_PUBLIC_URL) });
     for (const n of envNumbers(e, 'OVERSEERR')) {
       const p = `OVERSEERR_${n}`;
-      if (e[`${p}_URL`]) out.push({ name: e[`${p}_NAME`] || `seerr-${n}`, kind: 'seerr', url: trim(e[`${p}_URL`]), key: e[`${p}_KEY`] ?? '', issueTypes: normalizeTypes(e[`${p}_ISSUE_TYPES`]), resolve: e[`${p}_RESOLVE`] !== 'false', wholeSeries: e[`${p}_WHOLE_SERIES`] !== 'false' });
+      if (e[`${p}_URL`]) out.push({ name: e[`${p}_NAME`] || `seerr-${n}`, kind: 'seerr', url: trim(e[`${p}_URL`]), key: e[`${p}_KEY`] ?? '', issueTypes: normalizeTypes(e[`${p}_ISSUE_TYPES`]), resolve: e[`${p}_RESOLVE`] !== 'false', wholeSeries: e[`${p}_WHOLE_SERIES`] !== 'false', publicUrl: trim(e[`${p}_PUBLIC_URL`]) });
     }
     return out;
   },
-  envLines: (s, n) => [[`OVERSEERR_${n}_NAME`, s.name], [`OVERSEERR_${n}_URL`, s.url], [`OVERSEERR_${n}_KEY`, s.key], [`OVERSEERR_${n}_ISSUE_TYPES`, s.issueTypes ?? DEFAULT_TYPES], [`OVERSEERR_${n}_RESOLVE`, s.resolve !== false], [`OVERSEERR_${n}_WHOLE_SERIES`, s.wholeSeries !== false]],
+  envLines: (s, n) => [[`OVERSEERR_${n}_NAME`, s.name], [`OVERSEERR_${n}_URL`, s.url], [`OVERSEERR_${n}_KEY`, s.key], [`OVERSEERR_${n}_ISSUE_TYPES`, s.issueTypes ?? DEFAULT_TYPES], [`OVERSEERR_${n}_RESOLVE`, s.resolve !== false], [`OVERSEERR_${n}_WHOLE_SERIES`, s.wholeSeries !== false], [`OVERSEERR_${n}_PUBLIC_URL`, s.publicUrl ?? '']],
   // settings saved by older versions (a single Overseerr, as overseerrUrl, overseerrKey, ...)
   legacy: {
     keys: ['overseerrUrl', 'overseerrKey', 'overseerrTypes', 'overseerrResolve'],
     entries: (f) => (f.overseerrUrl ? [{ name: 'overseerr', kind: 'seerr', url: trim(f.overseerrUrl), key: f.overseerrKey ?? '', issueTypes: normalizeTypes(f.overseerrTypes), resolve: f.overseerrResolve !== false }] : []),
   },
-  normalize: (s, old) => ({ name: s.name, kind: 'seerr', url: trim(s.url), key: s.key || old?.key || '', issueTypes: normalizeTypes(s.issueTypes), resolve: s.resolve !== false, wholeSeries: s.wholeSeries !== false }),
+  normalize: (s, old) => ({ name: s.name, kind: 'seerr', url: trim(s.url), key: s.key || old?.key || '', issueTypes: normalizeTypes(s.issueTypes), resolve: s.resolve !== false, wholeSeries: s.wholeSeries !== false, publicUrl: trim(s.publicUrl) }),
   isConfigured: (s) => !!(s.key && s.url),
 
   checkArgs: (req, stored) => ({ url: trim(req.url), key: req.key || stored?.key }),
@@ -87,6 +102,7 @@ const seerr = {
   // shortcut: only the 100 newest open issues are read, upgrade to paging if you ever have more open at once.
   // The first instance (a source named "overseerr") keeps the original id format, so existing state and logs stay valid.
   async fetch(src) {
+    await loadAppUrl(src); // so the links in emails are the public ones
     return (await api(src, 'GET', '/issue?take=100&filter=open&sort=added')).results
       .map((issue) => ({ id: src.name === 'overseerr' ? `overseerr:${issue.id}` : `overseerr:${src.name}:${issue.id}`, date: issue.createdAt, kind: 'seerr', source: src.name, src, issue, user: userOf(issue, src) }));
   },
@@ -178,7 +194,7 @@ const seerr = {
     const titles = p.items.map((i) => i.title).filter(Boolean);
     record({ status: 'resolved', reportId: p.reportId, source: p.source, ...(titles.length ? { title: titles[0] + (titles.length > 1 ? ` and ${titles.length - 1} more` : '') } : {}), detail: `${what}: replacement imported, resolved`,
       userName: p.user?.name, issueType: cap(ISSUE_TYPE[p.issueType]), reportedAt: p.reportedAt,
-      outcome: 'Resolved', notice: p.issueType === 3 ? 'The subtitles were refreshed.' : 'The file was replaced and the new one is ready.', link: `${trim(src.url)}/issues/${p.ref}`,
+      outcome: 'Resolved', notice: p.issueType === 3 ? 'The subtitles were refreshed.' : 'The file was replaced and the new one is ready.', link: `${publicBase(src)}/issues/${p.ref}`,
       ...(p.user?.email && !c.dryRun ? { reporterEmail: p.user.email } : {}) });
   },
 };
