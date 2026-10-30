@@ -300,7 +300,7 @@ const rel = (iso) => {
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
 // Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
-const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : '');
+const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series/.test(r.detail ?? '') ? 'report' : '');
 const DISMISSED = { fixed: 'fixed later', retried: 'retried', expired: 'expired after 7 days', manual: 'dismissed' };
 const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<button type="button" class="btn sm" data-dismiss="${esc(r.id)}" title="Stop counting this as a failure">Dismiss</button>` : '');
 const retryBtn = (r) => (retryOf(r) && r.id && !r.retried && !r.dismissed ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
@@ -309,7 +309,7 @@ const isResolved = (r) => r.status === 'resolved' || (r.status === 'info' && /co
 const statusKind = (r) => isResolved(r) ? 'resolved' : r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
 const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed', dismissed: 'Dismissed' };
 const labelOf = (r) => { const k = statusKind(r); return STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)); };
-const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
+const sourceText = (r) => r.source || (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
 const pill = (k, label) => `<span class="status s-${k}"><i></i>${esc(label)}</span>`;
 const failing = () => LISTS.flatMap((l) => state.config[l].map((x) => [l, x.name])).filter(([l, n]) => healthOf(l, n)?.ok === false);
 const TAB_OF = Object.fromEntries(Object.entries(LIST_OF).map(([t, l]) => [l, t]));
@@ -371,10 +371,10 @@ function paintActivity() {
   $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
   $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
   $('lifecycle').classList.toggle('hidden', view !== 'report');
-  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed';
+  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Finished hidden' : 'Hide finished'; $('hidedone').title = 'Leaves out reports that are resolved or were skipped: nothing more will happen to them';
   if (view === 'report') { paintLifecycle(); return; }
   const q = query.trim().toLowerCase();
-  const done = hideDone ? new Set(lifecycles().filter((x) => x.kind === 'resolved').map((x) => x.id)) : new Set(); // reports that are finished
+  const done = hideDone ? new Set(lifecycles().filter(finished).map((x) => x.id)) : new Set(); // reports that are finished
   const match = (r) => !q || [r.title, sourceText(r), r.file, r.reportId, r.instance].join(' ').toLowerCase().includes(q);
   const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter) && match(r) && !done.has(r.reportId));
   $('rows').innerHTML = rows.map((r) => `<div class="item"><span class="st">${pill(statusKind(r), labelOf(r))}</span>
@@ -385,6 +385,7 @@ function paintActivity() {
 }
 // One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
 const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
+const finished = (x) => x.kind === 'resolved' || x.kind === 'skipped'; // nothing more will happen to it
 // A report's state follows how far it got, not its last row. A failed queue priority is cosmetic (the download goes ahead
 // anyway) and a dismissed failure is history, so neither counts; any other failure counts only until the report moves on,
 // and once it is resolved nothing can turn it back. The failed rows themselves stay in the timeline.
@@ -398,7 +399,7 @@ function lifecycles() {
     const done = Object.fromEntries(STEPS.map(([k]) => [k, has(k)]));
     const live = rows.filter((r) => !cosmetic(r));
     const kind = has('resolved') ? 'resolved' : live.length ? lifecycleKind((s) => live.some((r) => r.status === s), live.at(-1).status) : rows.some((r) => r.status === 'error' && !r.dismissed) ? 'failed' : 'dismissed';
-    return { id, rows, done, kind, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
+    return { id, rows, done, kind, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), reason: rows.at(-1).detail ?? '', time: rows[rows.length - 1].time };
   }).sort((a, b) => b.time.localeCompare(a.time));
 }
 // Download progress for a report, from what the server read off the *arr queue on its last poll.
@@ -416,12 +417,12 @@ function dlList(dl) {
 }
 function paintLifecycle() {
   const q = query.trim().toLowerCase();
-  const list = lifecycles().filter((x) => !(hideDone && x.kind === 'resolved')).filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
+  const list = lifecycles().filter((x) => !(hideDone && finished(x))).filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
   $('lifecycle').innerHTML = list.map((x) => {
     const full = x.kind === 'resolved', dl = full ? [] : dlOf(x.id), n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
     return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
       <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
-      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${dlSummary(dl)}</span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${x.kind === 'skipped' ? `<span>${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}</span>
       <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${full || x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
     ${dlList(dl)}<ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>

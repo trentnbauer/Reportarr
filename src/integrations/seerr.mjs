@@ -29,26 +29,29 @@ const seerr = {
     { name: 'key', label: 'API key', type: 'password', set: 'keySet', hint: 'Settings → General' },
     { name: 'issueTypes', label: 'Issue types to replace', hint: 'video, audio, subtitles, other' },
   ],
-  switches: [{ name: 'resolve', label: 'Resolve issues', hint: 'Comment after replacing, resolve once the new file is imported' }],
-  defaults: { issueTypes: DEFAULT_TYPES, resolve: true },
+  switches: [
+    { name: 'resolve', label: 'Resolve issues', hint: 'Comment after replacing, resolve once the new file is imported' },
+    { name: 'wholeSeries', label: 'Replace whole series', hint: 'When a report names no season, replace every episode (within the daily limit)' },
+  ],
+  defaults: { issueTypes: DEFAULT_TYPES, resolve: true, wholeSeries: true },
 
   // OVERSEERR_URL + OVERSEERR_KEY is one instance; OVERSEERR_2_URL / _KEY / _NAME / _ISSUE_TYPES / _RESOLVE are more
   fromEnv(e) {
     const out = [];
-    if (e.OVERSEERR_URL) out.push({ name: e.OVERSEERR_NAME || 'overseerr', kind: 'seerr', url: trim(e.OVERSEERR_URL), key: e.OVERSEERR_KEY || e.OVERSEERR_API_KEY || '', issueTypes: normalizeTypes(e.OVERSEERR_ISSUE_TYPES), resolve: e.OVERSEERR_RESOLVE !== 'false' });
+    if (e.OVERSEERR_URL) out.push({ name: e.OVERSEERR_NAME || 'overseerr', kind: 'seerr', url: trim(e.OVERSEERR_URL), key: e.OVERSEERR_KEY || e.OVERSEERR_API_KEY || '', issueTypes: normalizeTypes(e.OVERSEERR_ISSUE_TYPES), resolve: e.OVERSEERR_RESOLVE !== 'false', wholeSeries: e.OVERSEERR_WHOLE_SERIES !== 'false' });
     for (const n of envNumbers(e, 'OVERSEERR')) {
       const p = `OVERSEERR_${n}`;
-      if (e[`${p}_URL`]) out.push({ name: e[`${p}_NAME`] || `seerr-${n}`, kind: 'seerr', url: trim(e[`${p}_URL`]), key: e[`${p}_KEY`] ?? '', issueTypes: normalizeTypes(e[`${p}_ISSUE_TYPES`]), resolve: e[`${p}_RESOLVE`] !== 'false' });
+      if (e[`${p}_URL`]) out.push({ name: e[`${p}_NAME`] || `seerr-${n}`, kind: 'seerr', url: trim(e[`${p}_URL`]), key: e[`${p}_KEY`] ?? '', issueTypes: normalizeTypes(e[`${p}_ISSUE_TYPES`]), resolve: e[`${p}_RESOLVE`] !== 'false', wholeSeries: e[`${p}_WHOLE_SERIES`] !== 'false' });
     }
     return out;
   },
-  envLines: (s, n) => [[`OVERSEERR_${n}_NAME`, s.name], [`OVERSEERR_${n}_URL`, s.url], [`OVERSEERR_${n}_KEY`, s.key], [`OVERSEERR_${n}_ISSUE_TYPES`, s.issueTypes ?? DEFAULT_TYPES], [`OVERSEERR_${n}_RESOLVE`, s.resolve !== false]],
+  envLines: (s, n) => [[`OVERSEERR_${n}_NAME`, s.name], [`OVERSEERR_${n}_URL`, s.url], [`OVERSEERR_${n}_KEY`, s.key], [`OVERSEERR_${n}_ISSUE_TYPES`, s.issueTypes ?? DEFAULT_TYPES], [`OVERSEERR_${n}_RESOLVE`, s.resolve !== false], [`OVERSEERR_${n}_WHOLE_SERIES`, s.wholeSeries !== false]],
   // settings saved by older versions (a single Overseerr, as overseerrUrl, overseerrKey, ...)
   legacy: {
     keys: ['overseerrUrl', 'overseerrKey', 'overseerrTypes', 'overseerrResolve'],
     entries: (f) => (f.overseerrUrl ? [{ name: 'overseerr', kind: 'seerr', url: trim(f.overseerrUrl), key: f.overseerrKey ?? '', issueTypes: normalizeTypes(f.overseerrTypes), resolve: f.overseerrResolve !== false }] : []),
   },
-  normalize: (s, old) => ({ name: s.name, kind: 'seerr', url: trim(s.url), key: s.key || old?.key || '', issueTypes: normalizeTypes(s.issueTypes), resolve: s.resolve !== false }),
+  normalize: (s, old) => ({ name: s.name, kind: 'seerr', url: trim(s.url), key: s.key || old?.key || '', issueTypes: normalizeTypes(s.issueTypes), resolve: s.resolve !== false, wholeSeries: s.wholeSeries !== false }),
   isConfigured: (s) => !!(s.key && s.url),
 
   checkArgs: (req, stored) => ({ url: trim(req.url), key: req.key || stored?.key }),
@@ -80,11 +83,17 @@ const seerr = {
     if (!(src.issueTypes ?? DEFAULT_TYPES).split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
       return record({ status: 'skipped', ...base, detail: `${what}: ${type} issues are not set to be replaced` });
     }
-    if (issue.media.mediaType === 'tv' && !issue.problemSeason) {
-      return record({ status: 'skipped', ...base, detail: `${what}: reported against the whole series, which is not replaced automatically` });
+    if (issue.media.mediaType === 'tv' && !issue.problemSeason && src.wholeSeries === false) {
+      return record({ status: 'skipped', ...base, retry: 'report', detail: `${what}: reported against the whole series; turn on "Replace whole series" to replace it` });
     }
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
+    // A report is replaced whole or not at all: half a series, left open for good, is worse than waiting for the daily limit.
+    const room = ctx.allowance();
+    if (!c.dryRun && hits.length > room) {
+      if (hits.length > c.maxPerDay) return record({ status: 'skipped', ...base, retry: 'report', detail: `${what}: ${hits.length} files, more than the daily limit of ${c.maxPerDay}: raise MAX_PER_DAY to replace it` });
+      return ctx.defer(report, `${what}: ${hits.length} files need more than the ${room} left today: waiting for the daily count to reset`);
+    }
     let capped = false;
     const items = [];
     for (const hit of hits) { const done = await ctx.swap(report, hit.title, hit); if (done === false) capped = true; else if (done) items.push(done); }

@@ -136,6 +136,15 @@ const context = (c, s) => ({
   locateFromPlex: (m, files, plexGet) => locateFromPlex(c, m, files, plexGet),
   locateIssue: (issue) => locateIssue(c, issue),
   swap: (report, title, hit) => swap(c, s, report, title, hit),
+  // How many more replacements today's daily limit allows (unlimited when none is set).
+  allowance: () => { if (!Number.isFinite(c.maxPerDay)) return Infinity; capFull(c, s); return Math.max(0, c.maxPerDay - (s.count ?? 0)); },
+  // Not now: forget that the report was seen, so a later poll handles it again once there is room (the row is logged once a day).
+  defer: (report, detail) => {
+    s.seen = s.seen.filter((id) => id !== report.id);
+    const day = new Date().toISOString().slice(0, 10);
+    if ((s.deferred ??= {})[report.id] !== day) { s.deferred[report.id] = day; record({ status: 'info', reportId: report.id, source: labelOf(report), detail }); }
+    writeJson(stateFile(), s);
+  },
   // Ask for this report to be finished (source.finish) once every item has its new file back; see checkPending.
   watch: (report, items) => {
     (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, items, since: new Date().toISOString() });
@@ -266,7 +275,7 @@ export const requestHistoric = () => { historicRequested = true; wake?.(); };
 export const requestRetry = (id) => { retries.push(id); wake?.(); };
 
 // First row of a report's life; the UI's "By report" view groups rows by reportId.
-const received = (r) => record({ status: 'reported', reportId: r.id, source: labelOf(r), detail: 'report received' });
+const received = (r) => !readJson(changesFile(), []).some((x) => x.reportId === r.id && x.status === 'reported') && record({ status: 'reported', reportId: r.id, source: labelOf(r), detail: 'report received' });
 
 // Handles one report unless the daily cap is already full. Returns false when it is.
 async function act(c, s, r) {
@@ -278,7 +287,7 @@ async function act(c, s, r) {
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
 // redoing the report could delete the new download); any other failure runs the report again, through the daily cap.
 // Older versions saved a failed priority row without a retry field; its message gives it away.
-const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : undefined);
+const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series/.test(r.detail ?? '') ? 'report' : undefined);
 
 async function retry(c, s, nodes, id) {
   const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id), kind = row && retryKind(row);
