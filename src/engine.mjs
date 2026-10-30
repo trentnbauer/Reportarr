@@ -9,6 +9,7 @@ import { runCheck } from './checks.mjs';
 import { SOURCES, ARRS, CLIENT_BY_IMPLEMENTATION } from './integrations/index.mjs';
 import { request, fileName } from './integrations/arr.mjs';
 import { sleep, log, writeFileAtomic } from './util.mjs';
+import { notifyRow } from './notify.mjs';
 
 const dataFile = (n) => path.join(DATA_DIR, n);
 export const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -29,6 +30,7 @@ export function record(entry) {
   rows.push({ id: crypto.randomUUID(), time: new Date().toISOString(), ...entry });
   writeJson(changesFile(), rows.slice(-2000));
   log(entry.status, entry.title ?? '', entry.instance ?? '', entry.detail ?? '');
+  notifyRow(entry);
 }
 
 // How many replacements today out of the daily limit.
@@ -42,6 +44,7 @@ export const currentHealth = (c) => Object.fromEntries([
   ...c.sources.map((x) => [`source:${x.name}`, health[`source:${x.name}`]]),
   ...c.arrs.map((x) => [`arr:${x.name}`, health[`arr:${x.name}`]]),
   ...c.clients.map((x) => [`client:${x.name}`, health[`client:${x.name}`]]),
+  ...c.notifications.map((x) => [`notification:${x.name}`, health[`notification:${x.name}`]]),
 ].filter(([, v]) => v));
 
 // a call to a Sonarr/Radarr/Lidarr instance, on the API version its kind uses
@@ -232,17 +235,27 @@ async function act(c, s, r) {
 
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
 // redoing the report could delete the new download); any other failure runs the report again, through the daily cap.
+// Older versions saved a failed priority row without a retry field; its message gives it away.
+const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : undefined);
+
 async function retry(c, s, nodes, id) {
-  const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id);
-  if (!row?.retry || row.retried) return;
+  const rows = readJson(changesFile(), []), row = rows.find((x) => x.id === id), kind = row && retryKind(row);
+  if (!kind || row.retried) return;
   row.retried = true;
   writeJson(changesFile(), rows);
   const base = { reportId: row.reportId, source: row.source, title: row.title };
-  if (row.retry === 'priority') {
+  if (kind === 'priority') {
     const a = c.arrs.find((x) => x.name === row.instance);
     if (!a) return record({ status: 'error', ...base, detail: `retry: instance ${row.instance} is no longer configured` });
+    let match = row.match;
+    if (!match) { // saved before retries kept the match: find the download in the queue again by its title
+      const app = ARRS[a.kind], found = app.queueItem && (await arr(a, 'GET', `/queue?pageSize=200${app.queueQuery}`)).records.map((x) => app.queueItem(x)).find((x) => x?.title === row.title);
+      if (!found) return record({ status: 'skipped', ...base, instance: a.name, detail: 'retry: that download is no longer in the queue' });
+      match = found.match;
+    }
     record({ status: 'info', ...base, instance: a.name, detail: 'retrying queue priority' });
-    return prioritizeLater(c, a, row.match, row.title, base);
+    prioritizeLater(c, a, match, row.title, base); // in the background, like the first attempt: it waits for the queue
+    return;
   }
   const r = nodes.find((n) => n.id === row.reportId);
   if (!r) return record({ status: 'skipped', ...base, detail: 'retry: the report is no longer open' });
@@ -327,10 +340,14 @@ export async function poll() {
   return errors.join('; ');
 }
 
+let lastNotified = null;
+
 // Poll forever; the UI's "action existing reports" button wakes it early.
 export async function run() {
   for (;;) {
     await poll().then((partial) => { status.lastError = partial || null; if (partial) log('poll error', partial); }, (e) => { status.lastError = e.message; log('poll error', e.message); });
+    if (status.lastError && status.lastError !== lastNotified) notifyRow({ status: 'error', source: 'Reportarr', detail: `Polling hit a problem: ${status.lastError}` }); // once per distinct problem, not every minute
+    lastNotified = status.lastError;
     status.lastPoll = new Date().toISOString();
     await new Promise((r) => { wake = r; setTimeout(r, getConfig().pollSeconds * 1000); });
   }

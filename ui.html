@@ -6,175 +6,233 @@
 <title>Reportarr</title>
 <style>
   :root {
-    --bg:#ffffff; --fg:#1b1e23; --muted:#6b7280; --card:#f4f5f7; --line:#d9dce1; --line2:#eceef1;
+    --bg:#ffffff; --fg:#1b1e23; --muted:#6b7280; --card:#f6f7f9; --line:#dfe2e6; --line2:#eceef1;
     --accent:#b8780a; --ok:#157f3b; --bad:#b42318; --track:#e3e5e9; --off:#c5c9d0; --dim:#9aa0a6; --neutral:#4b5260;
     --warnbg:#fbf3e4; --accbg:#fbf1df; --acctext:#8f5d07; --accborder:#e9cf9c; --okbg:#e5f3ea; --badbg:#fcebe9;
-    --errbg:#fcefed; --errborder:#e8b4ae; --errtext:#8a1c12; --envbg:#eef0f3; --bar:rgba(255,255,255,.94);
+    --errbg:#fcefed; --errborder:#e8b4ae; --errtext:#8a1c12; --envbg:#f1f3f5; --bar:rgba(255,255,255,.94);
+    --shadow:0 1px 2px rgba(16,24,40,.05);
     color-scheme: light;
   }
   :root[data-theme="dark"] {
-    --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --line2:#262b31;
+    --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1b1f24; --line:#2f353c; --line2:#262b31;
     --accent:#e5a00d; --ok:#4ade80; --bad:#f97066; --track:#2f353c; --off:#3a4049; --dim:#6b7280; --neutral:#c3c7cd;
     --warnbg:#2a2416; --accbg:#2e2512; --acctext:#e5a00d; --accborder:#5a4517; --okbg:#15291d; --badbg:#2e1b1a;
     --errbg:#2c1c1c; --errborder:#5c2b27; --errtext:#f4a59d; --envbg:#1a1d21; --bar:rgba(20,22,25,.94);
+    --shadow:none;
     color-scheme: dark;
   }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-    --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1e2227; --line:#2f353c; --line2:#262b31;
+    --bg:#141619; --fg:#e8eaed; --muted:#9aa0a6; --card:#1b1f24; --line:#2f353c; --line2:#262b31;
     --accent:#e5a00d; --ok:#4ade80; --bad:#f97066; --track:#2f353c; --off:#3a4049; --dim:#6b7280; --neutral:#c3c7cd;
     --warnbg:#2a2416; --accbg:#2e2512; --acctext:#e5a00d; --accborder:#5a4517; --okbg:#15291d; --badbg:#2e1b1a;
     --errbg:#2c1c1c; --errborder:#5c2b27; --errtext:#f4a59d; --envbg:#1a1d21; --bar:rgba(20,22,25,.94);
+    --shadow:none;
     color-scheme: dark;
   } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; min-height:100vh; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
   code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.92em; }
-  a { color:var(--accent); }
+  a { color:var(--accent); } a:hover { color:var(--acctext); }
   input, select, button { font:inherit; }
   h1, h2, h3, p { margin:0; }
-  .wrap { max-width:1040px; margin-inline:auto; padding:16px 16px 56px; display:flex; flex-direction:column; gap:16px; }
+  .wrap { max-width:1080px; margin-inline:auto; padding:20px 20px 48px; display:flex; flex-direction:column; gap:20px; }
   .col { display:flex; flex-direction:column; }
   .row { display:flex; flex-wrap:wrap; align-items:center; }
   .muted { color:var(--muted); }
   .hidden { display:none !important; }
 
-  header.top { justify-content:space-between; gap:12px; padding:4px 0; }
+  /* header */
+  header.top { justify-content:space-between; gap:12px; padding-top:4px; }
   h1 { font-size:20px; font-weight:700; letter-spacing:-.01em; }
-  .pill { padding:2px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
-  .mode { display:flex; align-items:center; gap:7px; padding:6px 12px; border-radius:99px; font-size:13px; font-weight:700; letter-spacing:.04em; cursor:pointer; border:1px solid; }
-  .mode i { width:8px; height:8px; border-radius:50%; background:currentColor; }
+  .ver { font:500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted); padding:4px 7px; border:1px solid var(--line); border-radius:99px; }
+  .mode { display:flex; align-items:center; gap:7px; height:32px; padding:0 13px; border-radius:99px; font-size:12px; font-weight:700; letter-spacing:.06em; cursor:pointer; border:1px solid; }
+  .mode i { width:7px; height:7px; border-radius:50%; background:currentColor; }
   .mode.dry { background:var(--accbg); color:var(--acctext); border-color:var(--accborder); }
   .mode.live { background:var(--badbg); color:var(--bad); border-color:var(--errborder); }
   .mode:disabled { cursor:default; opacity:.8; }
-  .btn { padding:5px 11px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .themeseg { display:flex; gap:2px; padding:3px; height:32px; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:99px; }
+  .themeseg button { height:24px; padding:0 10px; border:0; border-radius:99px; font-size:12px; font-weight:600; cursor:pointer; background:transparent; color:var(--muted); }
+  .themeseg button.on { background:var(--bg); color:var(--fg); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .btn { height:30px; padding:0 12px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--fg); font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; text-decoration:none; }
+  .btn:hover { color:var(--fg); }
+  .btn.sm { height:28px; padding:0 11px; font-size:12.5px; }
+  .btn.add { height:32px; padding:0 13px; }
   .btn:disabled { opacity:.6; cursor:default; }
   .btn.danger { color:var(--bad); }
-  .btn.ghost { background:transparent; padding:6px 12px; }
 
-  .warn { display:flex; gap:12px; align-items:flex-start; border:1px solid var(--accent); background:var(--warnbg); border-radius:10px; padding:12px 14px; font-size:14px; }
-  .warn b.i { flex:none; width:20px; height:20px; border-radius:50%; background:var(--accent); color:#fff; font-size:13px; display:grid; place-items:center; margin-top:1px; }
+  .warn { display:flex; gap:12px; align-items:flex-start; border:1px solid var(--accborder); background:var(--warnbg); border-radius:10px; padding:12px 14px; font-size:13.5px; }
+  .warn b.i { flex:none; width:20px; height:20px; border-radius:50%; background:var(--accent); color:#fff; font-size:12px; display:grid; place-items:center; margin-top:1px; }
+  .warn > div { flex:1; min-width:0; text-wrap:pretty; }
+  .warn .linkbtn { flex:none; border:0; background:transparent; color:var(--acctext); font-size:13px; font-weight:600; cursor:pointer; padding:0 2px; }
 
   nav.tabs { display:flex; gap:4px; flex-wrap:wrap; box-shadow:inset 0 -1px 0 var(--line); margin-top:-4px; }
-  nav.tabs button { flex:none; padding:10px 14px; border:0; background:transparent; font-size:14px; font-weight:600; color:var(--muted); cursor:pointer; display:flex; align-items:center; gap:6px; box-shadow:inset 0 -2px 0 transparent; }
+  nav.tabs button { flex:none; padding:10px 12px; border:0; background:transparent; font-size:14px; font-weight:600; color:var(--muted); cursor:pointer; display:flex; align-items:center; gap:7px; box-shadow:inset 0 -2px 0 transparent; }
   nav.tabs button.on { color:var(--fg); box-shadow:inset 0 -2px 0 var(--accent); }
   nav.tabs .alert { width:7px; height:7px; border-radius:50%; background:var(--bad); }
 
-  .grid3 { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap:12px; }
-  .tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:6px; }
-  .tile .lbl { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
-  .tile .big { font-size:18px; font-weight:600; display:flex; align-items:center; gap:8px; }
-  .tile .sub { font-size:13px; color:var(--muted); }
+  /* activity: status strip */
+  .strip { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
+  .cell { background:var(--card); padding:14px 16px; display:flex; flex-direction:column; gap:6px; }
+  .cell .lbl { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; }
+  .cell .big { font-size:17px; font-weight:600; display:flex; align-items:baseline; gap:6px; }
+  .cell .big.dotted { align-items:center; gap:8px; }
+  .cell .big small { font-size:13px; font-weight:400; color:var(--muted); }
+  .cell .sub { font-size:12.5px; color:var(--muted); }
   .pulse { width:9px; height:9px; border-radius:50%; animation:pulse 2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.35 } }
-  .bar { height:6px; border-radius:99px; background:var(--track); overflow:hidden; }
+  .bar { height:6px; border-radius:99px; background:var(--track); overflow:hidden; margin-top:4px; }
   .bar > div { height:100%; background:var(--accent); border-radius:99px; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; }
-  .chip { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:99px; font-size:12px; background:var(--bg); border:1px solid var(--line); }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:99px; font-size:12px; background:var(--bg); border:1px solid var(--line); }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--dim); flex:none; }
   .chip .dot { width:7px; height:7px; }
   .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); } .dot.dim { background:var(--dim); }
 
-  .errbanner { gap:8px 14px; justify-content:space-between; border:1px solid var(--errborder); background:var(--errbg); border-radius:10px; padding:12px 14px; font-size:14px; color:var(--errtext); }
+  .errbanner { gap:8px 14px; justify-content:space-between; border:1px solid var(--errborder); background:var(--errbg); border-radius:10px; padding:11px 14px; font-size:13.5px; color:var(--errtext); }
   .errbanner > div { flex:1 1 300px; }
-  .errbanner a { font-weight:600; color:var(--bad); }
+  .errbanner a { font-weight:600; color:var(--bad); text-decoration:none; }
 
-  h2 { font-size:16px; }
-  .changes-head { justify-content:space-between; align-items:flex-end; gap:10px; margin-top:12px; }
-  .seg { display:flex; flex-wrap:wrap; gap:4px; padding:3px; background:var(--card); border:1px solid var(--line); border-radius:8px; }
-  .seg button { display:flex; align-items:center; gap:6px; padding:5px 10px; border:0; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; background:transparent; color:var(--muted); }
-  .seg button.on { background:var(--bg); color:var(--fg); box-shadow:0 1px 2px rgba(0,0,0,.08); }
-  .seg button span { font-size:12px; font-weight:500; color:var(--muted); }
-  .callout { gap:8px 14px; padding:10px 14px; border:1px dashed var(--line); border-radius:10px; font-size:14px; }
+  /* activity: changes */
+  h2 { font-size:16px; font-weight:700; }
+  .changes-head { justify-content:space-between; gap:10px; }
+  .seg { display:flex; flex-wrap:wrap; gap:2px; padding:3px; background:var(--card); border:1px solid var(--line); border-radius:8px; }
+  .seg button { display:flex; align-items:center; gap:6px; padding:4px 10px; border:0; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; background:transparent; color:var(--muted); }
+  .seg.views button { padding:4px 12px; }
+  .seg button.on { background:var(--bg); color:var(--fg); box-shadow:0 1px 2px rgba(0,0,0,.1); }
+  .seg button span { font-size:11.5px; font-weight:500; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .toolbar { gap:10px; }
+  input.search { flex:1 1 220px; min-width:0; }
+  .callout { gap:8px 14px; padding:10px 14px; border:1px dashed var(--line); border-radius:10px; font-size:13.5px; }
   .callout > span { flex:1 1 260px; color:var(--muted); }
   .callout strong { color:var(--fg); }
-  .list { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg); }
-  .lhead { display:flex; gap:14px; padding:8px 14px; background:var(--card); border-bottom:1px solid var(--line); font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
-  .lhead span:nth-child(1) { flex:0 0 118px; } .lhead span:nth-child(2) { flex:1 1 auto; } .lhead span:nth-child(3) { flex:0 0 110px; text-align:right; }
-  .item { display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px 14px; padding:11px 14px; border-bottom:1px solid var(--line2); }
-  .item:last-child { border-bottom:0; }
-  .item .st { flex:0 0 118px; display:flex; }
-  .status { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; }
-  .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
-  .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); } .s-replacing, .s-downloading, .s-downloaded { background:var(--accbg); color:var(--acctext); } .s-dry { background:var(--accbg); color:var(--acctext); }
-  .s-skipped, .s-other, .s-reported { background:var(--line2); color:var(--neutral); } .s-failed { background:var(--badbg); color:var(--bad); }
-  .lc { border:1px solid var(--line); border-radius:10px; background:var(--card); }
-  .lc > summary { list-style:none; cursor:pointer; padding:11px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; }
-  .lc > summary::-webkit-details-marker { display:none; }
-  .lc .who { flex:1 1 240px; min-width:0; display:flex; flex-direction:column; gap:2px; word-break:break-word; }
-  .steps { display:flex; gap:4px; flex-wrap:wrap; } .steps span { font-size:11px; padding:1px 7px; border-radius:99px; background:var(--line2); color:var(--neutral); } .steps span.done { background:var(--okbg); color:var(--ok); }
-  .tl { margin:0; padding:2px 14px 12px 14px; list-style:none; display:flex; flex-direction:column; gap:7px; border-top:1px solid var(--line2); }
-  .tl li { display:flex; flex-wrap:wrap; gap:4px 12px; padding-top:7px; font-size:13px; } .tl .tm { flex:0 0 150px; color:var(--muted); } .tl .st { flex:0 0 118px; display:flex; } .tl .tx { flex:1 1 240px; min-width:0; word-break:break-word; }
-  .item .body { flex:1 1 260px; min-width:0; display:flex; flex-direction:column; gap:2px; }
-  .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; }
-  .item .t b { font-size:14px; }
-  .item .t span, .item .d { font-size:13px; color:var(--muted); }
-  .item .body .btn { align-self:flex-start; margin-top:6px; }
-  .item .t span { font-size:12px; }
-  .item code { color:var(--fg); background:var(--card); padding:0 5px; border-radius:4px; }
-  .item .when { flex:0 0 110px; text-align:right; font-size:13px; color:var(--muted); margin-left:auto; }
-  .empty { padding:28px 14px; text-align:center; font-size:14px; color:var(--muted); }
 
-  .head { gap:4px; } .head p { font-size:13px; color:var(--muted); }
-  .env { display:inline-block; padding:0 6px; border-radius:99px; font-size:11px; border:1px solid var(--line); color:var(--muted); font-family:ui-monospace, monospace; }
-  .section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:12px; }
-  .sechead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }
-  .sechead h3 { font-size:15px; } .sechead .desc { font-size:13px; color:var(--muted); }
+  .list { border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--bg); box-shadow:var(--shadow); }
+  .lhead, .item { display:grid; grid-template-columns:112px minmax(0, 1fr) 84px; gap:14px; }
+  .lhead { padding:8px 16px; background:var(--card); border-bottom:1px solid var(--line); font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; }
+  .lhead span:last-child { text-align:right; }
+  .item { align-items:start; padding:12px 16px; border-top:1px solid var(--line2); }
+  #rows .item:first-child { border-top:0; }
+  .item .st { display:flex; padding-top:1px; }
+  .status { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); }
+  .s-replacing, .s-downloading, .s-downloaded, .s-dry { background:var(--accbg); color:var(--acctext); }
+  .s-skipped, .s-other, .s-reported { background:var(--line2); color:var(--neutral); }
+  .s-failed { background:var(--badbg); color:var(--bad); }
+  .item .body { min-width:0; display:flex; flex-direction:column; gap:3px; }
+  .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
+  .item .t b { font-size:14px; font-weight:600; }
+  .item .t span { font-size:12px; color:var(--muted); }
+  .meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; font-size:13px; color:var(--muted); word-break:break-word; }
+  .meta code { color:var(--fg); background:var(--card); border:1px solid var(--line2); padding:0 5px; border-radius:4px; }
+  .item .body .btn { align-self:flex-start; margin-top:6px; }
+  .item .when { text-align:right; font-size:12.5px; color:var(--muted); font-variant-numeric:tabular-nums; padding-top:2px; }
+  .empty { padding:32px 16px; text-align:center; font-size:13.5px; color:var(--muted); }
+
+  /* by report */
+  .lcs { gap:8px; }
+  .lc { border:1px solid var(--line); border-radius:12px; background:var(--bg); overflow:hidden; box-shadow:var(--shadow); }
+  .lc > summary { list-style:none; cursor:pointer; display:grid; grid-template-columns:112px minmax(0, 1fr) auto 84px; gap:14px; align-items:center; padding:12px 16px; }
+  .lc > summary::-webkit-details-marker { display:none; }
+  .lc .who { min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .lc .who b { font-size:14px; font-weight:600; }
+  .lc .who span { font-size:12px; color:var(--muted); word-break:break-all; }
+  .lc .prog { display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
+  .lc .prog small { font-size:11.5px; color:var(--muted); white-space:nowrap; }
+  .segs { display:flex; gap:3px; }
+  .segs i { width:18px; height:5px; border-radius:99px; background:var(--track); }
+  .segs i.done { background:var(--ok); }
+  .lc.failed .segs i.done { background:var(--bad); }
+  .lc .when { text-align:right; font-size:12.5px; color:var(--muted); }
+  .chev { display:inline-block; margin-left:4px; transition:transform .15s; }
+  .lc[open] .chev { transform:rotate(90deg); }
+  .tl { margin:0; padding:4px 16px 12px; list-style:none; display:flex; flex-direction:column; border-top:1px solid var(--line2); background:var(--card); }
+  .tl li { display:grid; grid-template-columns:150px 112px minmax(0, 1fr); gap:4px 14px; align-items:center; padding:8px 0; font-size:13px; border-bottom:1px solid var(--line2); }
+  .tl li:last-child { border-bottom:0; }
+  .tl .tm { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tl .st { display:flex; }
+  .tl .tx { min-width:0; word-break:break-word; color:var(--muted); }
+  .tl .tx code { color:var(--fg); }
+  .tl .tx .btn { margin-left:6px; vertical-align:middle; }
+
+  /* settings */
+  .head { gap:4px; } .head p { font-size:13px; color:var(--muted); text-wrap:pretty; }
+  .env { display:inline-block; padding:0 6px; border-radius:99px; font:11px/1.6 ui-monospace, monospace; border:1px solid var(--line); color:var(--muted); }
+  .section { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .sechead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .sechead h3 { font-size:14.5px; font-weight:700; } .sechead .desc { font-size:13px; color:var(--muted); text-wrap:pretty; }
   .sechead .grow { flex:1 1 300px; display:flex; flex-direction:column; }
-  .sechead .btn { flex:none; white-space:nowrap; }
-  .icard { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; }
-  .ihead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }
-  .ihead .l { display:flex; align-items:center; gap:8px; white-space:nowrap; }
-  .ihead .l b { font-size:14px; }
-  .ihead .r { display:flex; align-items:center; gap:10px; }
-  .res { font-size:13px; } .res.ok { color:var(--ok); } .res.bad { color:var(--bad); } .res.wait { color:var(--muted); }
-  .fields { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:10px; }
-  .fields.wide { grid-template-columns:repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap:12px; }
-  label.f { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
-  label.f .hint { font-size:12px; }
+  .secbody { padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .icard { background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); }
+  .ihead { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px 12px; padding:10px 14px; border-bottom:1px solid var(--line2); }
+  .ihead .l { display:flex; align-items:center; gap:8px; min-width:0; }
+  .ihead .l b { font-size:14px; font-weight:600; }
+  .ihead .l .kind { font-size:12.5px; color:var(--muted); }
+  .ihead .r { display:flex; align-items:center; gap:8px; }
+  .res { font-size:12.5px; } .res.ok { color:var(--ok); } .res.bad { color:var(--bad); } .res.wait { color:var(--muted); }
+  .fields { padding:14px; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap:12px 14px; }
+  .fields.wide { padding:16px; grid-template-columns:repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap:14px 16px; }
+  .switches { padding:0 14px 14px; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap:12px 14px; }
+  .switches.tiles { padding:4px 16px 16px; grid-template-columns:repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+  label.f { display:flex; flex-direction:column; gap:5px; font-size:12.5px; font-weight:600; color:var(--muted); }
+  label.f .hint { font-size:12px; font-weight:400; }
   label.f .lbl { display:flex; align-items:center; gap:6px; }
-  input, select { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
-  input:disabled, select:disabled { background:var(--envbg); }
-  .empty-dash { padding:18px; text-align:center; font-size:13px; color:var(--muted); border:1px dashed var(--line); border-radius:8px; }
-  .switch { display:flex; align-items:center; gap:10px; padding:2px 0; border:0; background:transparent; font-size:13px; color:var(--fg); text-align:left; cursor:pointer; align-self:flex-start; }
+  input, select { width:100%; height:34px; padding:0 10px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--fg); font-weight:400; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accbg); }
+  input:disabled, select:disabled { background:var(--envbg); color:var(--muted); }
+  .empty-dash { padding:20px; text-align:center; font-size:13px; color:var(--muted); border:1px dashed var(--line); border-radius:10px; }
+  .switch { display:flex; align-items:center; gap:12px; padding:0; border:0; background:transparent; font-size:13px; color:var(--fg); text-align:left; cursor:pointer; }
+  .switches.tiles .switch { padding:10px 12px; border:1px solid var(--line); border-radius:9px; background:var(--bg); }
   .switch:disabled { cursor:default; opacity:.7; }
   .switch .track { flex:none; width:34px; height:20px; border-radius:99px; background:var(--off); position:relative; transition:background .15s; }
   .switch .track::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); transition:left .15s; }
   .switch[aria-checked="true"] .track { background:var(--accent); }
   .switch[aria-checked="true"] .track::after { left:16px; }
   .switch b { font-weight:600; display:block; } .switch small { color:var(--muted); font-size:12px; display:block; }
-  .envrow { gap:8px 14px; padding:10px 0 4px; font-size:13px; color:var(--muted); }
-  .envrow a { font-weight:600; } .envrow span { flex:1 1 300px; }
+  .envrow { gap:8px 14px; padding:12px 16px; border:1px dashed var(--line); border-radius:12px; font-size:13px; color:var(--muted); }
+  .envrow span { flex:1 1 300px; text-wrap:pretty; }
 
-  .savebar { position:sticky; bottom:0; margin-top:20px; border-top:1px solid var(--line); background:var(--bar); backdrop-filter:blur(6px); }
-  .savebar > div { max-width:1040px; margin-inline:auto; padding:10px 16px; display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:12px; }
-  .savebar .msg { font-size:13px; margin-right:auto; }
-  .save { padding:9px 18px; border:0; border-radius:6px; background:var(--accent); color:#111; font-weight:600; cursor:pointer; }
+  .savebar { position:sticky; bottom:0; border-top:1px solid var(--line); background:var(--bar); backdrop-filter:blur(8px); }
+  .savebar > div { max-width:1080px; margin-inline:auto; padding:10px 20px; display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:12px; }
+  .savebar .msg { font-size:13px; margin-right:auto; display:flex; align-items:center; gap:8px; }
+  .savebar .msg::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .save { height:36px; padding:0 20px; border:0; border-radius:8px; background:var(--accent); color:#111; font-weight:600; cursor:pointer; }
   .save:disabled { opacity:.6; cursor:default; }
+  .save.clean { opacity:.6; }
+
+  @media (max-width:640px) {
+    .wrap { padding:16px 14px 40px; }
+    .lhead, .item, .lc > summary { grid-template-columns:122px minmax(0, 1fr); }
+    .lhead span:last-child { display:none; }
+    .item .when, .lc .when, .lc .prog { grid-column:2; text-align:left; align-items:flex-start; }
+    .tl li { grid-template-columns:minmax(0, 1fr); }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top row">
-    <div class="row" style="gap:10px"><h1>Reportarr</h1><span class="pill" id="version"></span></div>
-    <div class="row" style="gap:8px"><button type="button" class="mode dry" id="mode"></button><button type="button" class="btn ghost" id="theme" title="Switch between automatic, dark and light"></button></div>
+    <div class="row" style="gap:10px"><h1>Reportarr</h1><span class="ver" id="version"></span></div>
+    <div class="row" style="gap:10px"><button type="button" class="mode dry" id="mode"></button><div class="themeseg" id="themeseg" role="radiogroup" aria-label="Theme"></div></div>
   </header>
 
-  <div class="warn hidden" id="openwarn"><b class="i">!</b><div><strong>No login is set.</strong> Anyone who can reach this page can change settings, download your API keys and trigger deletions. Set <code>UI_USERNAME</code> and <code>UI_PASSWORD</code> to require one.</div></div>
+  <div class="warn hidden" id="openwarn"><b class="i">!</b><div><strong>No login is set.</strong> Anyone who can reach this page can change settings, download your API keys and trigger deletions. Set <code>UI_USERNAME</code> and <code>UI_PASSWORD</code> to require one.</div><button type="button" class="linkbtn" id="hidewarn">Hide</button></div>
 
   <nav class="tabs" id="tabs"></nav>
 
-  <div id="activity" class="col" style="gap:16px">
-    <section class="grid3" id="strip"></section>
+  <div id="activity" class="col" style="gap:20px">
+    <section class="strip" id="strip"></section>
     <div class="errbanner row hidden" id="errbanner"></div>
-    <section class="col" style="gap:10px">
-      <div class="changes-head row"><h2>Changes</h2><div class="seg" id="views"></div><div class="seg" id="filters"></div><input type="search" id="lcq" placeholder="Search report ID, title or file" class="hidden" style="flex:1 1 220px;min-width:0"></div>
+    <section class="col" style="gap:12px">
+      <div class="changes-head row"><h2>Changes</h2><div class="seg views" id="views"></div></div>
+      <div class="toolbar row"><div class="seg" id="filters"></div><input type="search" id="q" class="search" placeholder="Search title, file or report ID"></div>
       <div class="callout row hidden" id="historic"><span id="historictext"></span><button type="button" class="btn" id="historicbtn"></button></div>
-      <div id="lifecycle" class="col hidden" style="gap:8px"></div>
-      <div class="list" id="loglist"><div class="lhead"><span>Status</span><span>Title</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
+      <div id="lifecycle" class="col lcs hidden"></div>
+      <div class="list" id="loglist"><div class="lhead"><span>Status</span><span>Item</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
     </section>
   </div>
 
-  <section id="settings" class="col hidden" style="gap:12px">
+  <section id="settings" class="col hidden" style="gap:16px">
     <div class="col head"><h2 id="tabtitle"></h2><p>Fields marked <span class="env">env</span> come from the container environment and are read-only here. Secrets are never shown; leave blank to keep the current value.</p></div>
     <div id="panel" class="col" style="gap:12px"></div>
   </section>
@@ -191,32 +249,34 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const $ = (id) => document.getElementById(id);
 
 // ---- theme: auto follows the OS (CSS), dark/light force it; remembered in the browser
-const THEMES = ['auto', 'dark', 'light'];
+const THEMES = [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']];
 let theme = 'auto';
 try { theme = localStorage.getItem('theme') || 'auto'; } catch {}
 function applyTheme() {
   if (theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
-  $('theme').textContent = 'Theme: ' + theme;
+  $('themeseg').innerHTML = THEMES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${theme === k}" data-theme-set="${k}" class="${theme === k ? 'on' : ''}">${l}</button>`).join('');
 }
-$('theme').onclick = () => { theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; try { localStorage.setItem('theme', theme); } catch {} applyTheme(); };
+$('themeseg').onclick = (e) => { const b = e.target.closest('[data-theme-set]'); if (!b) return; theme = b.dataset.themeSet; try { localStorage.setItem('theme', theme); } catch {} applyTheme(); };
 applyTheme();
 
 // ---- state
 let state = null;       // what the server last said
 let draft = null;       // the settings being edited (not saved until Save)
 let dirty = false, saveMsg = '', saveErr = false;
-let tab = 'activity', filter = 'all', view = 'log', lcQuery = '', lcOpen = new Set(), uid = 0;
+let tab = 'activity', filter = 'all', view = 'log', query = '', lcOpen = new Set(), uid = 0;
 const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
-const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients']];
+const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients'], ['notify', 'Notifications']];
+const LIST_OF = { sources: 'sources', arr: 'arrs', clients: 'clients', notify: 'notifications' }; // tab -> the list it edits
+const LISTS = Object.values(LIST_OF);
 const K = () => state.kinds; // what each kind is called, its fields and defaults: sent by the server from its integrations
-const TARGET = { sources: 'source', arrs: 'arr', clients: 'client' };
+const TARGET = { sources: 'source', arrs: 'arr', clients: 'client', notifications: 'notification' };
 const HKEY = TARGET;
 const locked = (k) => state.locked.includes(k);
 
 function newDraft() {
   const c = state.config;
   draft = { pollSeconds: c.pollSeconds, maxPerDay: c.maxPerDay, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
-  for (const l of ['sources', 'arrs', 'clients']) draft[l] = c[l].map((x) => ({ ...x, _id: ++uid }));
+  for (const l of LISTS) draft[l] = c[l].map((x) => ({ ...x, _id: ++uid }));
 }
 const find = (list, id) => draft[list].find((x) => x._id === +id);
 const markDirty = () => { if (!dirty) { dirty = true; saveMsg = ''; saveErr = false; paintSave(); } };
@@ -228,18 +288,22 @@ const rel = (iso) => {
 };
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
+// Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
+const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : '');
+const retryBtn = (r) => (retryOf(r) && r.id && !r.retried ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
 const statusKind = (r) => ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
 const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
+const labelOf = (r) => { const k = statusKind(r); return STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)); };
 const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
-const failing = () => [
-  ...state.config.sources.map((x) => ['sources', x.name]), ...state.config.arrs.map((x) => ['arrs', x.name]), ...state.config.clients.map((x) => ['clients', x.name]),
-].filter(([l, n]) => healthOf(l, n)?.ok === false);
-const TAB_OF = { sources: 'sources', arrs: 'arr', clients: 'clients' };
+const pill = (k, label) => `<span class="status s-${k}"><i></i>${esc(label)}</span>`;
+const failing = () => LISTS.flatMap((l) => state.config[l].map((x) => [l, x.name])).filter(([l, n]) => healthOf(l, n)?.ok === false);
+const TAB_OF = Object.fromEntries(Object.entries(LIST_OF).map(([t, l]) => [l, t]));
 
 // ---- header
 function paintHeader() {
   $('version').textContent = state.version;
   $('openwarn').classList.toggle('hidden', state.authEnabled !== false || draft.hideLoginWarning);
+  $('hidewarn').classList.toggle('hidden', locked('hideLoginWarning'));
   const m = $('mode');
   m.className = 'mode ' + (draft.dryRun ? 'dry' : 'live'); m.disabled = locked('dryRun');
   m.title = locked('dryRun') ? 'DRY_RUN is set in the environment' : 'Click to switch; saved with Save';
@@ -248,19 +312,20 @@ function paintHeader() {
   $('tabs').innerHTML = TABS.map(([k, label]) => `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${label}${bad.has(k) ? '<span class="alert"></span>' : ''}</button>`).join('');
 }
 $('mode').onclick = () => { draft.dryRun = !draft.dryRun; markDirty(); paintHeader(); if (tab === 'app') renderPanel(); };
+$('hidewarn').onclick = () => { draft.hideLoginWarning = true; markDirty(); paintHeader(); if (tab === 'app') renderPanel(); };
 $('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) location.hash = b.dataset.tab; };
 
 // ---- activity tab
 function paintActivity() {
   const bad = failing(), issues = bad.length + (state.status.lastError ? 1 : 0);
   const t = state.today, pct = t.max ? Math.min(100, Math.round((t.count / t.max) * 100)) : 100;
-  const chips = [...state.config.sources.map((x) => ['sources', x]), ...state.config.arrs.map((x) => ['arrs', x]), ...state.config.clients.map((x) => ['clients', x])]
+  const chips = LISTS.flatMap((l) => state.config[l].map((x) => [l, x]))
     .map(([l, x]) => { const h = healthOf(l, x.name); return `<span class="chip" title="${esc(h?.message ?? 'not checked yet')}"><span class="dot ${dotClass(h)}"></span>${esc(x.name)}</span>`; }).join('');
   $('strip').innerHTML = `
-    <div class="tile"><div class="lbl">Polling</div><div class="big"><span class="pulse" style="background:var(${issues ? '--accent' : '--ok'})"></span>${issues ? `Running, ${issues} issue${issues === 1 ? '' : 's'}` : 'Healthy'}</div>
+    <div class="cell"><div class="lbl">Polling</div><div class="big dotted"><span class="pulse" style="background:var(${issues ? '--accent' : '--ok'})"></span>${issues ? `Running, ${issues} issue${issues === 1 ? '' : 's'}` : 'Healthy'}</div>
       <div class="sub">${state.status.lastPoll ? `Last poll ${esc(rel(state.status.lastPoll))} · every ${state.pollSeconds} s` : 'Waiting for the first poll'}</div></div>
-    <div class="tile"><div class="lbl">Today</div><div class="big">${t.count} <span class="muted" style="font-size:14px;font-weight:400">of ${t.max} replacements</span></div><div class="bar"><div style="width:${pct}%"></div></div></div>
-    <div class="tile"><div class="lbl">Connections</div><div class="chips">${chips || '<span class="sub">Nothing configured yet</span>'}</div></div>`;
+    <div class="cell"><div class="lbl">Today</div><div class="big">${t.count}<small>of ${t.max} replacements</small></div><div class="bar"><div style="width:${pct}%"></div></div></div>
+    <div class="cell"><div class="lbl">Connections</div><div class="chips">${chips || '<span class="sub">Nothing configured yet</span>'}</div></div>`;
 
   const eb = $('errbanner');
   if (state.status.lastError) {
@@ -287,21 +352,20 @@ function paintActivity() {
 
   $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
   $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
-  $('lcq').classList.toggle('hidden', view !== 'report'); $('lifecycle').classList.toggle('hidden', view !== 'report');
+  $('lifecycle').classList.toggle('hidden', view !== 'report');
   if (view === 'report') { paintLifecycle(); return; }
-  const rows = filter === 'all' ? all : all.filter((r) => statusKind(r) === filter);
-  $('rows').innerHTML = rows.map((r) => {
-    const k = statusKind(r), label = STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1));
-    return `<div class="item"><span class="st"><span class="status s-${k}"><i></i>${esc(label)}</span></span>
+  const q = query.trim().toLowerCase();
+  const match = (r) => !q || [r.title, sourceText(r), r.file, r.reportId, r.instance].join(' ').toLowerCase().includes(q);
+  const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter) && match(r));
+  $('rows').innerHTML = rows.map((r) => `<div class="item"><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
-      <div class="d">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</div>${r.retry && r.id && !r.retried ? `<button type="button" class="btn" data-retry="${esc(r.id)}">${r.retry === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : ''}</div>
-      <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`;
-  }).join('');
+      <div class="meta">${r.instance ? `<code>${esc(r.instance)}</code>` : ''}${r.file ? `<code>${esc(r.file)}</code>` : ''}<span>${esc(r.detail)}</span></div>${retryBtn(r)}</div>
+      <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`).join('');
   $('empty').classList.toggle('hidden', rows.length > 0);
 }
 // One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
 const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
-const lifecycleKind = (has, last) => last === 'error' ? 'failed' : ['resolved', 'available', 'imported', 'downloaded', 'downloading', 'replacing', 'replaced', 'skipped'].find(has) ?? 'reported';
+const lifecycleKind = (has, last) => last === 'error' ? 'failed' : ['resolved', 'available', 'imported', 'downloaded', 'downloading', 'replacing', 'replaced', 'skipped'].find(has) ?? (last === 'dry-run' ? 'dry' : 'reported');
 function lifecycles() {
   const g = new Map();
   for (const r of [...state.changes].reverse()) if (r.reportId) { if (!g.has(r.reportId)) g.set(r.reportId, []); g.get(r.reportId).push(r); }
@@ -312,27 +376,31 @@ function lifecycles() {
   }).sort((a, b) => b.time.localeCompare(a.time));
 }
 function paintLifecycle() {
-  const q = lcQuery.trim().toLowerCase();
+  const q = query.trim().toLowerCase();
   const list = lifecycles().filter((x) => !q || [x.id, x.source, ...x.titles, ...x.files].join(' ').toLowerCase().includes(q));
-  $('lifecycle').innerHTML = list.map((x) => `<details class="lc" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
-      <span class="status s-${x.kind}"><i></i>${esc(STATUS_LABEL[x.kind] ?? x.kind)}</span>
-      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span class="muted">${esc(x.source)} · <code>${esc(x.id)}</code></span></span>
-      <span class="steps">${STEPS.map(([k, l]) => `<span class="${x.done[k] ? 'done' : ''}">${l}</span>`).join('')}</span>
-      <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}</span></summary>
-    <ol class="tl">${x.rows.map((r) => { const k = statusKind(r); return `<li><span class="tm">${esc(new Date(r.time).toLocaleString())}</span><span class="st"><span class="status s-${k}"><i></i>${esc(STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)))}</span></span>
-      <span class="tx">${r.title ? `<b>${esc(r.title)}</b> ` : ''}${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}</span></li>`; }).join('')}</ol></details>`).join('')
-    || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
+  $('lifecycle').innerHTML = list.map((x) => {
+    const n = STEPS.filter(([k]) => x.done[k]).length;
+    return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
+      <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span></span>
+      <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
+      <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
+    <ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
+      <span class="tx">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}${retryBtn(r)}</span></li>`).join('')}</ol></details>`;
+  }).join('') || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
 }
 $('views').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; paintActivity(); } };
-$('lcq').oninput = (e) => { lcQuery = e.target.value; paintLifecycle(); };
+$('q').oninput = (e) => { query = e.target.value; paintActivity(); };
 $('lifecycle').addEventListener('toggle', (e) => { const id = e.target.dataset?.id; if (id) e.target.open ? lcOpen.add(id) : lcOpen.delete(id); }, true);
-$('rows').onclick = async (e) => {
+const onRetry = async (e) => {
   const b = e.target.closest('[data-retry]'); if (!b) return;
+  e.preventDefault(); // a button inside a card must not toggle it
   if (!state.config.dryRun && b.textContent === 'Retry' && !confirm('This runs the report again, which can delete and re-download its file. Continue?')) return;
   b.disabled = true; b.textContent = 'Retrying…';
   const r = await fetch(api('retry'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.retry }) }).catch(() => null);
   b.textContent = r?.ok ? 'Retrying · see table' : 'Failed to start';
 };
+$('rows').onclick = onRetry; $('lifecycle').addEventListener('click', onRetry);
 $('filters').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; paintActivity(); } };
 $('historicbtn').onclick = async () => {
   const n = state.status.historic;
@@ -357,8 +425,8 @@ function res(x) {
 }
 function card(list, x) {
   const env = !!x.fromEnv, meta = K()[list][x.kind];
-  const typeDisabled = env || !x.isNew; // a saved card keeps its type; change it by removing and adding again
-  const type = `<label class="f">Type<select data-list="${list}" data-id="${x._id}" data-f="kind" ${typeDisabled ? 'disabled' : ''}>${Object.entries(K()[list]).map(([k, m]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`;
+  // only a new card chooses its type; a saved one shows it in the header (change it by removing and adding again)
+  const type = x.isNew && !env ? `<label class="f">Type<select data-list="${list}" data-id="${x._id}" data-f="kind">${Object.entries(K()[list]).map(([k, m]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>` : '';
   const f = (label, name, t, o = {}) => field(label, t ?? 'text', x[name], { dis: env, attrs: `data-list="${list}" data-id="${x._id}" data-f="${name}"`, ...o });
   const nameField = f('Name', 'name', 'text', { dis: env || !x.isNew });
   const fields = meta.fields.map((fd) => f(fd.label, fd.name, fd.type, {
@@ -367,15 +435,16 @@ function card(list, x) {
   })).join('');
   const extra = meta.switches.map((sw) => switchBtn(`data-list="${list}" data-id="${x._id}" data-flip="${sw.name}"`, x[sw.name] !== false, sw.label, sw.hint, env)).join('');
   return `<div class="icard" data-card="${x._id}">
-    <div class="ihead"><div class="l"><span class="dot ${cardDot(list, x)}" data-dot="${list}:${esc(x.name)}:${x._id}"></span><b>${esc(x.name)}</b>${env ? '<span class="env">env</span>' : ''}${x.default ? '<span class="env" title="used for any client of this kind that is not matched by address">default</span>' : ''}</div>
-      <div class="r" data-res="${x._id}">${res(x)}<button type="button" class="btn" data-test="${list}" data-id="${x._id}">Test</button>${env ? '' : `<button type="button" class="btn danger" data-remove="${list}" data-id="${x._id}">Remove</button>`}</div></div>
-    <div class="fields">${type}${nameField}${fields}</div>${extra}</div>`;
+    <div class="ihead"><div class="l"><span class="dot ${cardDot(list, x)}" data-dot="${list}:${esc(x.name)}:${x._id}"></span><b>${esc(x.name)}</b><span class="kind">${esc(meta.label)}</span>${env ? '<span class="env">env</span>' : ''}${x.default ? '<span class="env" title="used for any client of this kind that is not matched by address">default</span>' : ''}</div>
+      <div class="r" data-res="${x._id}">${res(x)}<button type="button" class="btn sm" data-test="${list}" data-id="${x._id}">Test</button>${env ? '' : `<button type="button" class="btn sm danger" data-remove="${list}" data-id="${x._id}">Remove</button>`}</div></div>
+    <div class="fields">${type}${nameField}${fields}</div>${extra ? `<div class="switches">${extra}</div>` : ''}</div>`;
 }
 
 const SECTIONS = {
   sources: ['Plex & Overseerr / Seerr', 'Where reports come from. Every instance is polled; a report is matched to whichever *arr owns the file.', 'Add at least one Plex or Overseerr / Seerr instance so Reportarr has reports to act on.'],
   arrs: ['Sonarr / Radarr / Lidarr', 'Environment instances are read-only. Ones you add are kept alongside them.', 'Add a Sonarr, Radarr or Lidarr instance so Reportarr has somewhere to replace files.'],
   clients: ['Download clients', 'Moves replacements to the top of the queue. Matched to the client Sonarr/Radarr uses by host:port, or name.', 'No download clients. Replacements are still searched, just not moved to the top of the queue.'],
+  notifications: ['Discord & email', 'Tells you when Reportarr replaces a file, a report fails, or the daily cap is reached. Each channel picks its own events.', 'No notification channels. Add Discord or SMTP email to hear about replacements and failures.'],
 };
 function renderPanel() {
   const p = $('panel');
@@ -384,16 +453,17 @@ function renderPanel() {
       <div class="fields wide">
         ${field('Poll interval (seconds)', 'number', draft.pollSeconds, { attrs: 'data-top="pollSeconds" min="10"', dis: locked('pollSeconds'), env: locked('pollSeconds') })}
         ${field('Max replacements per day', 'number', draft.maxPerDay, { attrs: 'data-top="maxPerDay" min="0"', dis: locked('maxPerDay'), env: locked('maxPerDay') })}
+      </div>
+      <div class="switches tiles">
         ${switchBtn('data-flip="dryRun"', draft.dryRun, 'Dry run', 'Log only, never delete', locked('dryRun'))}
         ${switchBtn('data-flip="hideLoginWarning"', draft.hideLoginWarning, 'Hide the no-login warning', 'Only shown when no UI password is set', locked('hideLoginWarning'))}
       </div></div>
-      <div class="envrow row"><a href="${api('env')}" id="envlink" download="reportarr.env">Download .env</a><span>Your saved settings as a compose file. Contains API keys, so keep it private; rename to <code>.env</code> and restart.</span></div>`;
+      <div class="envrow row"><span>Your saved settings as a compose <code>.env</code> file. Contains API keys, so keep it private; rename to <code>.env</code> and restart.</span><a class="btn" href="${api('env')}" id="envlink" download="reportarr.env">Download .env</a></div>`;
     return;
   }
-  const [title, desc, none] = SECTIONS[{ sources: 'sources', arr: 'arrs', clients: 'clients' }[tab]] ?? [];
-  const list = { sources: 'sources', arr: 'arrs', clients: 'clients' }[tab];
-  p.innerHTML = `<div class="section" id="${tab === 'arr' ? 'instances' : tab}"><div class="sechead"><div class="grow"><h3>${title}</h3><span class="desc">${desc}</span></div><button type="button" class="btn" data-add="${list}">+ Add</button></div>
-    ${draft[list].map((x) => card(list, x)).join('')}${draft[list].length ? '' : `<div class="empty-dash">${none}</div>`}</div>`;
+  const list = LIST_OF[tab], [title, desc, none] = SECTIONS[list] ?? [];
+  p.innerHTML = `<div class="section" id="${tab === 'arr' ? 'instances' : tab}"><div class="sechead"><div class="grow"><h3>${title}</h3><span class="desc">${desc}</span></div><button type="button" class="btn add" data-add="${list}">+ Add</button></div>
+    <div class="secbody">${draft[list].map((x) => card(list, x)).join('')}${draft[list].length ? '' : `<div class="empty-dash">${none}</div>`}</div></div>`;
 }
 
 function showTab() {
@@ -408,6 +478,7 @@ function paintSave() {
   const m = $('savemsg');
   m.textContent = dirty ? 'Unsaved changes' : saveMsg || 'All changes saved';
   m.style.color = dirty ? 'var(--acctext)' : saveErr ? 'var(--bad)' : saveMsg ? 'var(--ok)' : 'var(--muted)';
+  $('save').classList.toggle('clean', !dirty);
 }
 function paintDots() { // after a refresh, update dots and tab alerts without touching the form
   document.querySelectorAll('[data-dot]').forEach((el) => { const p = el.dataset.dot.split(':'), list = p[0], x = find(list, p.at(-1)); if (x) el.className = 'dot ' + cardDot(list, x); });
@@ -452,7 +523,9 @@ $('panel').addEventListener('click', async (e) => {
 // Test sends the card's current values (so you can test before saving); a blank secret uses the saved one by name.
 async function runTest(list, x) {
   const req = { target: TARGET[list], kind: x.kind, name: x.name };
-  for (const fd of K()[list][x.kind].fields) req[fd.name] = x[fd.name]; // exactly what the card shows
+  const meta = K()[list][x.kind];
+  for (const fd of meta.fields) req[fd.name] = x[fd.name]; // exactly what the card shows
+  for (const sw of meta.switches) req[sw.name] = x[sw.name];
   for (const k of Object.keys(tests)) if (+k !== x._id && tests[k].st !== 'testing') delete tests[k]; // one result at a time, as before
   tests[x._id] = { st: 'testing' }; refreshCard(list, x);
   try {
@@ -470,8 +543,8 @@ function refreshCard(list, x) { // only the result and dot, so unsaved typing is
 
 // ---- save
 $('save').onclick = async () => {
-  const strip = ({ _id, isNew, keySet, passwordSet, apiKeySet, fromEnv, ...rest }) => rest;
-  const patch = { sources: draft.sources.filter((x) => !x.fromEnv).map(strip), arrs: draft.arrs.filter((x) => !x.fromEnv).map(strip), clients: draft.clients.filter((x) => !x.fromEnv).map(strip) };
+  const strip = ({ _id, isNew, keySet, passwordSet, apiKeySet, webhookSet, fromEnv, ...rest }) => rest;
+  const patch = Object.fromEntries(LISTS.map((l) => [l, draft[l].filter((x) => !x.fromEnv).map(strip)]));
   for (const k of ['pollSeconds', 'maxPerDay', 'dryRun', 'hideLoginWarning']) if (!locked(k)) patch[k] = draft[k];
   $('save').disabled = true;
   try {

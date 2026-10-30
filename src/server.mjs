@@ -93,7 +93,7 @@ export function serve() {
         if (req.headers.origin && !sameOrigin(req, baseHost)) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
         if (route === 'test') {
           const req2 = JSON.parse(await body(req)), result = await runCheck(getConfig(), req2);
-          const prefix2 = { source: 'source', arr: 'arr', client: 'client' }[req2.target];
+          const prefix2 = { source: 'source', arr: 'arr', client: 'client', notification: 'notification' }[req2.target];
           if (prefix2 && req2.name) health[`${prefix2}:${req2.name}`] = { ok: result.ok, message: result.message, at: new Date().toISOString() }; // so the status page shows it too
           return send(200, 'application/json', JSON.stringify(result));
         }

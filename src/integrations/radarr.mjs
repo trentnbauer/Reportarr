@@ -24,6 +24,10 @@ const radarr = {
     return movie?.hasFile ? [{ a, movie, fileId: movie.movieFile.id, file: fileName(movie.movieFile.path), title: movie.title, plex: { type: 'movie', title: movie.title, tmdb: movie.tmdbId } }] : [];
   },
 
+  // see sonarr.mjs: a queue item by the title Reportarr logs
+  queueQuery: '&includeMovie=true',
+  queueItem: (q) => q.movie && { title: q.movie.title, match: { movieId: q.movieId } },
+
   plan: ({ movie }) => ({
     hist: `/history/movie?movieId=${movie.id}&eventType=1`,
     del: (id) => `/moviefile/${id}`, cmd: { name: 'MoviesSearch', movieIds: [movie.id] }, match: { movieId: movie.id }, check: `/movie/${movie.id}`,

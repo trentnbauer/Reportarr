@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 const rnd = () => randomBytes(8).toString('hex'); // generated per run so the repo holds no secret-looking literals
 const KEY = rnd();
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-os-'));
-const { handleReport: replaceIssue, poll } = await import('../src/engine.mjs');
+const { handleReport: replaceIssue, poll, requestRetry } = await import('../src/engine.mjs');
 const { saveConfig } = await import('../src/config.mjs');
 
 const calls = [];
@@ -159,6 +159,27 @@ test('every step of a replacement is logged against the report and the file, and
   assert.equal(done.file, 'Show - S02E01 new.mkv');
   assert.equal(changes().find((r) => r.reportId === 'overseerr:12' && r.status === 'replaced').file, undefined, 'mock episode file has no path');
   imported = false;
+});
+
+test('a failed queue priority saved by an older version can still be retried', async () => {
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs });
+  const file = path.join(process.env.DATA_DIR, 'changes.json'), rows = changes();
+  rows.push({ id: 'legacy-1', time: new Date().toISOString(), status: 'error', reportId: 'overseerr:6', title: 'Show S02E01', instance: 'sonarr', detail: 'priority failed: qBittorrent password for x is hidden by the arr' });
+  fs.writeFileSync(file, JSON.stringify(rows));
+  queueRecords = [{ episodeId: 13, series: { title: 'Show' }, episode: { seasonNumber: 2, episodeNumber: 1 }, title: 'rel' }];
+  requestRetry('legacy-1');
+  await poll();
+  assert.match(changes().at(-1).detail, /retrying queue priority/);
+  assert.equal(changes().find((r) => r.id === 'legacy-1').retried, true);
+  queueRecords = [];
+  const tries = () => changes().filter((r) => r.detail === 'retrying queue priority').length;
+  const before = tries();
+  requestRetry('legacy-1'); await poll(); // only once
+  assert.equal(tries(), before);
+  rows.push({ id: 'legacy-2', time: new Date().toISOString(), status: 'error', reportId: 'overseerr:6', title: 'Show S09E09', instance: 'sonarr', detail: 'priority failed: x' });
+  fs.writeFileSync(file, JSON.stringify(rows.map((r) => (r.id === 'legacy-1' ? changes().find((x) => x.id === 'legacy-1') : r))));
+  requestRetry('legacy-2'); await poll();
+  assert.match(changes().at(-1).detail, /no longer in the queue/);
 });
 
 test.after(() => { for (const s of [radarr, sonarr, overseerr]) s.close(); });

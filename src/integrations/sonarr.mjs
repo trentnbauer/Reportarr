@@ -34,6 +34,11 @@ const sonarr = {
       plex: { type: 'episode', title: series.title, tvdb: series.tvdbId, tmdb: series.tmdbId, season: ep.seasonNumber, episode: ep.episodeNumber } }));
   },
 
+  // A queue item (asked for with its series and episode) by the title Reportarr logs: lets a failed priority row from
+  // before retries kept their match be retried.
+  queueQuery: '&includeSeries=true&includeEpisode=true',
+  queueItem: (q) => q.series && q.episode && { title: `${q.series.title} ${sxe(q.episode)}`, match: { episodeId: q.episodeId } },
+
   // what to call to find the grabbed release, delete the file, search again, and spot the new grab in the queue
   plan: ({ ep }) => ({
     hist: `/history?episodeId=${ep.id}&eventType=1&pageSize=1&sortKey=date&sortDirection=descending`,

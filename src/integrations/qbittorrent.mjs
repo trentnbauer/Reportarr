@@ -30,12 +30,14 @@ const qbittorrent = {
   },
 
   // Move a torrent to the top of the queue. dc is the matched client (its secrets resolved); q is the *arr's queue item.
+  // The *arr hides the password it holds, so it can be blank here. A qBittorrent that trusts this address (the LAN bypass
+  // setting) needs none, so try without one and only complain about a hidden password if qBittorrent refuses.
   async prioritize(dc, q) {
-    if (!dc.password) throw new Error(`qBittorrent password for ${q.downloadClient} (${dc.url}) is hidden by the arr: add it to CLIENTS or set QBIT_PASSWORD`);
-    const body = new URLSearchParams({ username: dc.username, password: dc.password });
-    const cookie = (await work(`${dc.url}/api/v2/auth/login`, { method: 'POST', body })).headers.get('set-cookie')?.split(';')[0];
-    if (!cookie) throw new Error(`qBittorrent login failed at ${dc.url}`);
-    const r = await work(`${dc.url}/api/v2/torrents/topPrio`, { method: 'POST', headers: { cookie }, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
+    const login = await work(`${dc.url}/api/v2/auth/login`, { method: 'POST', body: new URLSearchParams({ username: dc.username ?? '', password: dc.password ?? '' }) });
+    const cookie = login.headers.get('set-cookie')?.split(';')[0];
+    if (!cookie && dc.password) throw new Error(`qBittorrent login failed at ${dc.url}`);
+    const r = await work(`${dc.url}/api/v2/torrents/topPrio`, { method: 'POST', headers: cookie ? { cookie } : {}, body: new URLSearchParams({ hashes: q.downloadId.toLowerCase() }) });
+    if ((r.status === 401 || r.status === 403) && !dc.password) throw new Error(`qBittorrent at ${dc.url} wants a login and the password for ${q.downloadClient} is hidden by the arr: add it to CLIENTS or set QBIT_PASSWORD`);
     if (!r.ok) throw new Error(`qBittorrent topPrio ${r.status}`); // 409 = torrent queueing disabled
   },
 };
