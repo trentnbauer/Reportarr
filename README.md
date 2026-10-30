@@ -60,6 +60,9 @@ Everything can be set with environment variables (the `.env` file), in the web U
 | `OVERSEERR_URL`, `OVERSEERR_KEY` | | An Overseerr/Seerr and its API key (Settings, General). Leave blank to skip Overseerr. More instances: `OVERSEERR_2_URL`, `OVERSEERR_2_KEY`, `OVERSEERR_2_NAME`, and so on. |
 | `OVERSEERR_ISSUE_TYPES`, `OVERSEERR_2_ISSUE_TYPES`, ... | `video,audio,other` | Which issue types replace the file: `video`, `audio`, `subtitles`, `other`. |
 | `OVERSEERR_RESOLVE`, `OVERSEERR_2_RESOLVE`, ... | `true` | Comment on the Overseerr issue after replacing, and resolve it once the new file is imported. Set `false` to leave the issue alone. |
+| `DISCORD_WEBHOOK`, `DISCORD_USERNAME`, `DISCORD_EVENTS` | | A Discord channel webhook (Server Settings, Integrations, Webhooks), an optional bot name (default Reportarr), and which events it hears about. More channels: `DISCORD_2_WEBHOOK`, `DISCORD_2_USERNAME`, `DISCORD_2_EVENTS`, `DISCORD_2_NAME`, and so on. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO`, `SMTP_TLS`, `SMTP_EVENTS` | port `587`, TLS `true` | Email through an SMTP server. `SMTP_TO` takes several addresses, comma-separated. TLS means implicit TLS on port 465 and STARTTLS on any other port; `SMTP_TLS=false` sends without it. More: `SMTP_2_HOST`, `SMTP_2_TO`, ... |
+| `DISCORD_EVENTS`, `SMTP_EVENTS`, `DISCORD_2_EVENTS`, ... | all four | Comma-separated events that channel is told about: `replaced`, `failed`, `resolved`, `cap`. Unset means all of them. |
 | `DRY_RUN` | `true` | Log what would happen without deleting anything. |
 | `POLL_SECONDS` | `60` | How often to check for new reports. |
 | `MAX_PER_DAY` | `20` | Maximum replacements per day: each episode, movie or album counts as one. |
@@ -105,13 +108,17 @@ If your proxy does not strip the prefix (for example `reverse_proxy /reportarr/*
 
 ### The web UI
 
-The page has five tabs. **Activity** shows whether polling is healthy, how many replacements happened today out of your daily limit, a coloured dot for every source, \*arr instance and download client, and the list of changes (filter by Replaced, Dry run, Skipped or Failed). **App settings**, **Sources** (Plex servers and Overseerr/Seerr instances), **\*arr suite** and **Download clients** hold the settings, one card per instance, with a sticky **Save** bar that warns you about unsaved changes. Sources and \*arr instances are checked automatically (sources on every poll, \*arr instances every few minutes); download clients only when you press Test, because logging in repeatedly can get you banned. Your theme choice (auto, dark, light) is remembered, and the tab you are on is kept in the URL.
+The page has six tabs. **Activity** shows whether polling is healthy, how many replacements happened today out of your daily limit, a coloured dot for every source, \*arr instance, download client and notification channel, and the list of changes, as a **Log** (filter by Replacing, Replaced, Resolved, Dry run, Skipped or Failed) or **By report**, one card per report with its progress through seven steps; both can be searched by title, file name or report ID. **App settings**, **Sources** (Plex servers and Overseerr/Seerr instances), **\*arr suite**, **Download clients** and **Notifications** hold the settings, one card per instance, with a sticky **Save** bar that warns you about unsaved changes. Sources and \*arr instances are checked automatically (sources on every poll, \*arr instances every few minutes); download clients only when you press Test, because logging in repeatedly can get you banned. Your theme choice (auto, dark, light) is remembered, and the tab you are on is kept in the URL.
 
 **Several Plex servers.** Each Plex source takes only the reports for its own server (reports name the server they are about, and one Plex account can own several), so two servers on one account, or servers on different accounts, each get their own reports. Each Overseerr/Seerr instance is polled separately, and issue numbers may repeat between instances.
 
 ### Test buttons
 
-Each card has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr/Lidarr instance and every download client. It checks the values currently in the card, so you can test before saving, and a blank secret uses the one you saved. A check makes the same kind of call the app makes (for example it confirms the Plex token can read reports, that an address really is Sonarr and not Radarr, and that the SABnzbd key is the full one) and times out after 10 seconds. Results never show keys or passwords. A test only reads; it never changes anything in the service.
+Each card has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr/Lidarr instance, every download client and every notification channel. It checks the values currently in the card, so you can test before saving, and a blank secret uses the one you saved. A check makes the same kind of call the app makes (for example it confirms the Plex token can read reports, that an address really is Sonarr and not Radarr, and that the SABnzbd key is the full one) and times out after 10 seconds. Results never show keys or passwords. A test only reads; it never changes anything in the service. The one exception is a notification channel, whose test posts a real test message.
+
+### Notifications
+
+The **Notifications** tab (or the `DISCORD_*` and `SMTP_*` variables) sends a message to Discord and/or email when something happens. Each channel picks its own events: **Replacements** (a file was deleted and searched again), **Failures** (a report or a connection failed; a queue priority that did not work is not counted), **Resolved** (the new file is in Plex and the issue was resolved) and **Daily cap reached** (once a day). Events that arrive close together are sent as one message, so a replaced season is one Discord post or one email, not twelve. Messages are signed "Reportarr (automated system)". Discord only accepts a real `discord.com` webhook address, and the message cannot ping anyone. Email needs no extra software: Reportarr speaks SMTP itself, with `AUTH PLAIN` when a username is set. A failing channel is logged and skipped; it never holds up a replacement. **Test** sends a real message.
 
 ### Moving UI settings into compose
 
@@ -161,6 +168,7 @@ src/engine.mjs              the polling loop and the replace flow
 src/server.mjs              the web UI's HTTP server, login, and reverse-proxy handling
 src/config.mjs              settings from the environment and the UI: merge, save, export
 src/checks.mjs              finds the right integration for a Test button
+src/notify.mjs              turns log rows into events and sends them (batched) to the notification channels
 src/util.mjs                small shared helpers
 src/integrations/
   index.mjs                 the registry: lists every integration
@@ -168,6 +176,7 @@ src/integrations/
   arr.mjs                   what Sonarr, Radarr and Lidarr share
   sonarr.mjs  radarr.mjs  lidarr.mjs
   qbittorrent.mjs  sabnzbd.mjs   download clients
+  discord.mjs  smtp.mjs    notification channels (events.mjs: the events they share)
 test/                       one test file per area (node --test)
 ```
 
@@ -178,7 +187,8 @@ Copy the closest existing file, make it declare the same things, and list it in 
 - everything: `kind`, `label`, `prefix`, `defaultUrl`, `fields` (what the settings card shows), `defaults`, `fromEnv(env)` (your environment variables), `check(args)` and `checkArgs(request, saved)` (the Test button);
 - a **source** (where reports come from): `fetch(source)` returns the open reports, `replace(ctx, report)` handles one, plus `label`, `isConfigured`, `normalize` and `envLines`;
 - an ***arr app**: `plan(hit)` says how to delete, blocklist and search again, and `fromPlex` and/or `fromIssue` find the file a report is about;
-- a **download client**: `implementation` (the name the \*arr gives it) and `prioritize(client, queueItem)`.
+- a **download client**: `implementation` (the name the \*arr gives it) and `prioritize(client, queueItem)`;
+- a **notification channel**: `send(channel, message)`, `validate`, `normalize`, `envLines`, `isConfigured` and its event switches (it has no URL, so no `defaultUrl`).
 
 The settings page, the `.env` export, the Test button and the Connections strip then pick it up with no other change.
 
