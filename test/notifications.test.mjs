@@ -55,7 +55,8 @@ Object.assign(process.env, {
 const discord = (await import('../src/integrations/discord.mjs')).default;
 const smtp = (await import('../src/integrations/smtp.mjs')).default;
 const { getConfig, saveConfig, publicConfig, validate, envFile } = await import('../src/config.mjs');
-const { notifyRow, flushAll, eventOf, compose } = await import('../src/notify.mjs');
+const { notifyRow, notifyReporter, flushAll, eventOf, compose } = await import('../src/notify.mjs');
+const { record, changesFile } = await import('../src/engine.mjs');
 const { runCheck } = await import('../src/checks.mjs');
 
 const SMTP = { name: 'email-1', kind: 'smtp', host: '127.0.0.1', port: String(smtpPort), username: 'me', password: PASS, from: 'reportarr@example.com', to: 'a@example.com, b@example.com', tls: false };
@@ -217,6 +218,52 @@ test('the template is saved with the channel, shown to the UI, and exported to .
   saveConfig({ notifications: [{ ...SMTP, name: 'gmail-1', template: 'bogus' }] });
   assert.equal(getConfig().notifications.find((x) => x.name === 'gmail-1').template, '', 'an unknown template is not stored');
   saveConfig({ notifications: [] });
+});
+
+const bodyOf = (m) => { const [head, body] = m.raw.split('\r\n\r\n'); return { head, text: Buffer.from(body.replace(/\r\n/g, '').replace(/\.$/, ''), 'base64').toString() }; };
+
+test('the reporter is emailed when their report is completed, with the reason, only through a channel that has it on', async () => {
+  saveConfig({ notifications: [{ ...SMTP, name: 'on', toReporter: true }, { ...SMTP, name: 'off', toReporter: false }] });
+  mails.length = 0;
+  await notifyReporter({ reporterEmail: 'bob@example.com', outcome: 'Denied', notice: 'Series report. Report a season or 1 file.', link: 'http://seerr/issues/9' });
+  assert.equal(mails.length, 1, 'one email, from the channel that has it on');
+  assert.deepEqual(mails[0].to, ['<bob@example.com>'], 'to the reporter only, not the channel\'s own recipients');
+  const { head, text } = bodyOf(mails[0]);
+  assert.match(head, /Subject: \[Reportarr\] Denied/);
+  assert.match(text, /Denied - Series report\. Report a season or 1 file\./);
+  assert.match(text, /http:\/\/seerr\/issues\/9/);
+  assert.match(text, /— Reportarr \(automated system\)/);
+  mails.length = 0;
+  await notifyReporter({ outcome: 'Denied', notice: 'x' });
+  await notifyReporter({ reporterEmail: 'bob@example.com', outcome: 'Denied' });
+  assert.equal(mails.length, 0, 'nothing without an address or a reason');
+  saveConfig({ notifications: [{ ...SMTP, toReporter: false }] });
+  await notifyReporter({ reporterEmail: 'bob@example.com', outcome: 'Resolved', notice: 'The file was replaced and the new one is ready.' });
+  assert.equal(mails.length, 0, 'nothing when no channel has it on');
+  saveConfig({ notifications: [] });
+});
+
+test('logging a completed report emails the reporter, and keeps their address out of the log', async () => {
+  saveConfig({ notifications: [{ ...SMTP, toReporter: true }] });
+  mails.length = 0;
+  record({ status: 'denied', reportId: 'overseerr:5', title: 'Heat', reporterEmail: 'dana@example.com', outcome: 'Denied', notice: 'No file was found.', detail: 'x' });
+  for (let i = 0; i < 40 && !mails.length; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(mails.length, 1);
+  assert.match(bodyOf(mails[0]).head, /Subject: \[Reportarr\] Denied: Heat/);
+  const log = fs.readFileSync(changesFile(), 'utf8');
+  assert.ok(!log.includes('dana@example.com'), 'the address is not stored');
+  assert.match(log, /No file was found\./);
+  saveConfig({ notifications: [] });
+});
+
+test('"Email the reporter" is off by default, comes from SMTP_TO_REPORTER, and is exported', () => {
+  assert.equal(smtp.fromEnv({ SMTP_HOST: 'h' })[0].toReporter, false);
+  assert.equal(smtp.fromEnv({ SMTP_HOST: 'h', SMTP_TO_REPORTER: 'true' })[0].toReporter, true);
+  assert.equal(smtp.normalize({ name: 'e', host: 'h', from: 'a@b.c', to: 'a@b.c' }).toReporter, false);
+  assert.equal(smtp.normalize({ name: 'e', toReporter: true }).toReporter, true);
+  assert.deepEqual(smtp.envLines({ toReporter: true }, 1).find(([k]) => k === 'SMTP_1_TO_REPORTER'), ['SMTP_1_TO_REPORTER', true]);
+  assert.equal(smtp.defaults.toReporter, false);
+  assert.ok(smtp.switches.some((s) => s.name === 'toReporter'));
 });
 
 test.after(() => { discordServer.close(); smtpServer.close(); });

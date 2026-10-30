@@ -55,6 +55,19 @@ export async function flush(event) {
 }
 export const flushAll = () => Promise.all([...queue.keys()].map(flush));
 
+// Email the person who made a report when it is completed (resolved, denied or skipped), with the reason. Only through SMTP channels
+// that have "Email the reporter" on. Never batched: one email per report, to that person only. Returns a promise for tests.
+export function notifyReporter(r) {
+  if (!r.reporterEmail || !r.notice) return Promise.resolve();
+  try {
+    const msg = { event: 'reporter', to: [r.reporterEmail], title: `${r.outcome}${r.title ? `: ${r.title}` : ''}`,
+      lines: [`${r.outcome} - ${r.notice}`, ...(r.title ? [`About: ${r.title}`] : []), ...(r.link ? [`Your report: ${r.link}`] : [])] };
+    return Promise.allSettled(getConfig().notifications
+      .filter((ch) => ch.kind === 'smtp' && ch.toReporter === true && NOTIFIERS.smtp.isConfigured(ch))
+      .map((ch) => NOTIFIERS.smtp.send(ch, msg).catch((e) => log('notification', ch.name, 'failed to email the reporter:', why(e)))));
+  } catch (e) { log('notification', 'reporter not emailed:', why(e)); return Promise.resolve(); }
+}
+
 // Called for every row the app logs.
 export function notifyRow(row) {
   try {

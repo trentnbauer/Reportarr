@@ -25,8 +25,12 @@ const api = async (src, method, p, body) => {
 // Who made an issue: the key counts their replacements, the name is what people see.
 const userOf = (issue, src) => {
   const u = issue.createdBy;
-  return u?.id ? { key: `${src.name}:${u.id}`, name: u.displayName || u.plexUsername || u.username || u.email || `user ${u.id}` } : undefined;
+  return u?.id ? { key: `${src.name}:${u.id}`, name: u.displayName || u.plexUsername || u.username || u.email || `user ${u.id}`, email: u.email } : undefined;
 };
+
+// What the reporter is told when their report is completed: the outcome and the reason (the log keeps these; the address is only used to
+// email them, and never in a dry run).
+const tell = (c, report, outcome, notice) => ({ outcome, notice, link: `${trim(report.src.url)}/issues/${report.issue.id}`, ...(report.user?.email && !c.dryRun ? { reporterEmail: report.user.email } : {}) });
 
 const seerr = {
   kind: 'seerr', label: 'Overseerr / Seerr', prefix: 'seerr', defaultUrl: 'http://overseerr:5055',
@@ -87,10 +91,10 @@ const seerr = {
     const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${issue.id}`;
     const base = { reportId: report.id, source: seerr.reportLabel(report) };
     if (!(src.issueTypes ?? DEFAULT_TYPES).split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
-      return record({ status: 'denied', ...base, detail: `${what}: ${type} issues are not set to be replaced` }); // refused by settings; Seerr is left alone, someone else may fix it
+      return record({ status: 'denied', ...base, ...tell(c, report, 'Denied', `${type === 'subtitles' ? 'Subtitle' : type.charAt(0).toUpperCase() + type.slice(1)} issues are not fixed automatically on this server. Please ask the server owner.`), detail: `${what}: ${type} issues are not set to be replaced` }); // refused by settings; Seerr is left alone, someone else may fix it
     }
     const subs = type === 'subtitles'; // fixed by the subtitle manager (Bazarr), not by replacing the video
-    if (subs && !ctx.hasSubtitles()) return record({ status: 'denied', ...base, detail: `${what}: no subtitle manager (Bazarr) is set up to fix subtitle issues` });
+    if (subs && !ctx.hasSubtitles()) return record({ status: 'denied', ...base, ...tell(c, report, 'Denied', 'Subtitle problems are not fixed automatically on this server. Please ask the server owner.'), detail: `${what}: no subtitle manager (Bazarr) is set up to fix subtitle issues` });
     if (issue.media.mediaType === 'tv' && !issue.problemSeason && src.wholeSeries === false) {
       // Not replacing a whole series: close the issue and ask for the particular episode. Left alone (with a Retry) in a dry run, or when
       // resolving issues is off, since both mean "do not touch Seerr".
@@ -102,13 +106,13 @@ const seerr = {
           closed = true;
         } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); }
       }
-      return record({ status: 'denied', ...base, ...(closed ? {} : { retry: 'report' }),
+      return record({ status: 'denied', ...base, ...tell(c, report, 'Denied', 'Series report. Report a season or 1 file.'), ...(closed ? {} : { retry: 'report' }),
         detail: closed ? `${what}: reported against the whole series; closed it and asked for the particular episode` : `${what}: reported against the whole series ("Replace whole series" is off)` });
     }
     // Over their daily limit: held until tomorrow (the report is looked at again each poll), or until someone presses Override.
     if (!c.dryRun && ctx.userRoom(report) <= 0) return ctx.hold(report, `${report.user.name} has reached their daily limit of ${c.maxPerUserPerDay}: ${what} is held until tomorrow, or press Override`);
     const hits = await ctx.locateIssue(issue);
-    if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
+    if (!hits.length) return record({ status: 'skipped', ...base, ...tell(c, report, 'Skipped', 'No file was found for this title, so there was nothing to replace.'), detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
     if (subs) for (const h of hits) h.op = 'subtitles';
     // As many files as this hour's limit allows now; the rest wait in the report's backlog and carry on as the limit resets.
     const room = c.dryRun ? hits.length : ctx.allowance(report);
@@ -135,11 +139,14 @@ const seerr = {
   },
 
   // Called by the engine when every replacement file is back.
-  async finish({ record }, src, p) {
+  async finish({ record, c }, src, p) {
     if (src.resolve === false) return; // only carried a backlog: nothing to tell Seerr
     const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${p.ref}`;
     await api(src, 'POST', `/issue/${p.ref}/resolved`);
-    record({ status: 'resolved', reportId: p.reportId, source: p.source, detail: `${what}: replacement imported, resolved` });
+    const titles = p.items.map((i) => i.title).filter(Boolean);
+    record({ status: 'resolved', reportId: p.reportId, source: p.source, ...(titles.length ? { title: titles[0] + (titles.length > 1 ? ` and ${titles.length - 1} more` : '') } : {}), detail: `${what}: replacement imported, resolved`,
+      outcome: 'Resolved', notice: p.issueType === 3 ? 'The subtitles were refreshed.' : 'The file was replaced and the new one is ready.', link: `${trim(src.url)}/issues/${p.ref}`,
+      ...(p.user?.email && !c.dryRun ? { reporterEmail: p.user.email } : {}) });
   },
 };
 export default seerr;
