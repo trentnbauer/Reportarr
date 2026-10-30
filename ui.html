@@ -118,9 +118,8 @@
   .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
   .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); }
   .s-replacing, .s-downloading, .s-downloaded, .s-dry { background:var(--accbg); color:var(--acctext); }
-  .openbadge { color:var(--acctext) !important; font-weight:600; }
   .s-denied { background:var(--line2); color:var(--bad); }
-  .s-held, .s-alert { background:var(--accbg); color:var(--acctext); }
+  .s-open, .s-held, .s-alert { background:var(--accbg); color:var(--acctext); }
   .s-alertfail { background:var(--badbg); color:var(--bad); }
   .s-skipped, .s-other, .s-reported, .s-dismissed { background:var(--line2); color:var(--neutral); }
   .s-failed { background:var(--badbg); color:var(--bad); }
@@ -306,7 +305,7 @@ const rel = (iso) => {
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
 // Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
-const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)|no Sonarr\/Radarr instance has a file/.test(r.detail ?? '') ? 'report' : '');
+const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)|no Sonarr\/Radarr instance has a file(?!.*closed it)/.test(r.detail ?? '') ? 'report' : '');
 const DISMISSED = { fixed: 'fixed later', retried: 'retried', expired: 'expired after 7 days', manual: 'dismissed' };
 const overrideBtn = (r) => (r.status === 'held' && r.reportId && !r.overridden ? `<button type="button" class="btn sm" data-override="${esc(r.reportId)}" title="Let this report through the user limit now">Override limit</button>` : '');
 const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<button type="button" class="btn sm" data-dismiss="${esc(r.id)}" title="Stop counting this as a failure">Dismiss</button>` : '');
@@ -314,7 +313,7 @@ const retryBtn = (r) => (retryOf(r) && r.id && !r.retried && !r.dismissed ? `<bu
 // Versions before the lifecycle rows logged a resolved issue as an info row; it counts as resolved.
 const isResolved = (r) => r.status === 'resolved' || (r.status === 'info' && /commented and resolved$/.test(r.detail ?? ''));
 const statusKind = (r) => isResolved(r) ? 'resolved' : r.status === 'alert' ? (r.failed ? 'alertfail' : 'alert') : r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', denied: 'denied', held: 'held', error: 'failed' }[r.status] ?? 'other');
-const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', denied: 'Denied', held: 'Held', alert: 'Alert', alertfail: 'Alert failed', failed: 'Failed', dismissed: 'Dismissed' };
+const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', denied: 'Denied', open: 'Open in Seerr', held: 'Held', alert: 'Alert', alertfail: 'Alert failed', failed: 'Failed', dismissed: 'Dismissed' };
 const labelOf = (r) => { const k = statusKind(r); return STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)); };
 const sourceText = (r) => r.source || (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
 const pill = (k, label) => `<span class="status s-${k}"><i></i>${esc(label)}</span>`;
@@ -379,7 +378,7 @@ function paintActivity() {
   $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
   $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
   $('lifecycle').classList.toggle('hidden', view !== 'report');
-  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed'; $('hidedone').title = 'Leaves out reports that are resolved, or skipped or denied and closed in Seerr: nothing more will happen to them. Ones still open in Seerr stay.';
+  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed'; $('hidedone').title = 'Leaves out reports that are completed: resolved, skipped or denied, and (for Seerr) closed. A report whose Seerr issue is open stays.';
   if (view === 'report') { paintLifecycle(); return; }
   const q = query.trim().toLowerCase();
   const done = hideDone ? new Set(lifecycles().filter(finished).map((x) => x.id)) : new Set(); // reports that are finished
@@ -393,10 +392,9 @@ function paintActivity() {
 }
 // One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
 const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
-// Reportarr is done with it AND its source has nothing left to do: a skipped or denied Seerr report whose issue is still open in Seerr
-// is not completed, whatever Reportarr decided (it stays visible, marked, and Hide completed leaves it alone).
-const openInSource = (id) => (state.status.open ?? []).includes(id);
-const finished = (x) => x.kind === 'resolved' || (['skipped', 'denied'].includes(x.kind) && !openInSource(x.id));
+// A Seerr report is not completed (resolved, skipped or denied) until its Seerr issue is closed: while it is open, or was reopened, it is
+// "open in Seerr", whatever Reportarr decided, and Hide completed leaves it alone. (Unknown until the server has read Seerr once.)
+const finished = (x) => ['resolved', 'skipped', 'denied'].includes(x.kind); // an open Seerr report has the kind "open" instead (see lifecycles)
 // A report's state follows how far it got, not its last row. A failed queue priority is cosmetic (the download goes ahead
 // anyway) and a dismissed failure is history, so neither counts; any other failure counts only until the report moves on,
 // and once it is resolved nothing can turn it back. The failed rows themselves stay in the timeline.
@@ -409,8 +407,9 @@ function lifecycles() {
     const has = (s) => rows.some((r) => (s === 'resolved' ? isResolved(r) : r.status === s)), uniq = (k) => [...new Set(rows.map((r) => r[k]).filter(Boolean))];
     const done = Object.fromEntries(STEPS.map(([k]) => [k, has(k)]));
     const live = rows.filter((r) => !cosmetic(r));
-    const kind = has('resolved') ? 'resolved' : live.length ? lifecycleKind((s) => live.some((r) => r.status === s), live.at(-1).status) : rows.some((r) => r.status === 'error' && !r.dismissed) ? 'failed' : 'dismissed';
-    return { id, rows, done, kind, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), reason: rows.at(-1).detail ?? '', time: rows[rows.length - 1].time };
+    const was = has('resolved') ? 'resolved' : live.length ? lifecycleKind((s) => live.some((r) => r.status === s), live.at(-1).status) : rows.some((r) => r.status === 'error' && !r.dismissed) ? 'failed' : 'dismissed';
+    const kind = id.startsWith('overseerr:') && state.status.open?.includes(id) && ['resolved', 'skipped', 'denied'].includes(was) ? 'open' : was;
+    return { id, rows, done, kind, was, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), reason: rows.findLast((r) => r.status !== 'alert')?.detail ?? '', time: rows[rows.length - 1].time };
   }).sort((a, b) => b.time.localeCompare(a.time));
 }
 // Download progress for a report, from what the server read off the *arr queue on its last poll.
@@ -433,7 +432,7 @@ function paintLifecycle() {
     const full = x.kind === 'resolved', dl = full ? [] : dlOf(x.id), n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
     return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
       <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
-      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${openInSource(x.id) && ['skipped', 'denied'].includes(x.kind) ? '<span class="openbadge">Still open in Seerr</span>' : ''}${x.kind === 'skipped' || x.kind === 'denied' ? `<span>${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}${(state.status.backlog ?? []).filter((b) => b.reportId === x.id).map((b) => `<span>${b.count} more file${b.count === 1 ? '' : 's'} waiting for the hourly limit</span>`).join('')}</span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${['skipped', 'denied', 'open'].includes(x.kind) ? `<span>${x.kind === 'open' ? esc(`${STATUS_LABEL[x.was] ?? x.was}: `) : ''}${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}${(state.status.backlog ?? []).filter((b) => b.reportId === x.id).map((b) => `<span>${b.count} more file${b.count === 1 ? '' : 's'} waiting for the hourly limit</span>`).join('')}</span>
       <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${full || x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
     ${dlList(dl)}<ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>

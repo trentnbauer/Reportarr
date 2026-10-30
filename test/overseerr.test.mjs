@@ -96,17 +96,17 @@ test('a series without a TVDB id is found by TMDB id', async () => {
   assert.ok(w.includes('DELETE sonarr /api/v3/episodefile/101'));
 });
 
-test('subtitle issues, whole-series issues with that switched off, and unknown titles are skipped without touching anything', async () => {
+test('subtitle issues, whole-series issues with that switched off, and unknown titles (with resolving off) are left in Seerr, untouched', async () => {
   assert.deepEqual(await run(issue(5, movie, { issueType: 3 })), []);
   assert.deepEqual(await run(issue(6, tv), { ...base, sources: [{ ...SRC, wholeSeries: false, resolve: false }] }), []);
-  assert.deepEqual(await run(issue(7, { tmdbId: 1, tvdbId: null, mediaType: 'movie' })), []);
+  assert.deepEqual(await run(issue(7, { tmdbId: 1, tvdbId: null, mediaType: 'movie' }), { ...base, sources: [{ ...SRC, resolve: false }] }), [], 'with resolving off, Seerr is left alone');
   const last = changes().slice(-3).map((r) => r.status + ': ' + r.detail);
   assert.match(last[0], /subtitles issues are not set/);
   assert.equal(changes().slice(-3)[0].status, 'denied', 'refused by settings, so Denied');
   assert.match(last[1], /Replace whole series/);
   assert.equal(changes().find((r) => r.reportId === 'overseerr:6' && r.status === 'denied').retry, 'report', 'left open, it can be retried once the switch is on');
   assert.match(last[2], /no Sonarr\/Radarr instance/);
-  assert.equal(changes().at(-1).retry, 'report', 'a skip for no file can be retried: the library may have it later');
+  assert.equal(changes().at(-1).retry, 'report', 'left open, a skip for no file can be retried: the library may have it later');
 });
 
 test('dry run and "resolve off" leave Overseerr alone', async () => {
@@ -219,6 +219,44 @@ test('a completed report carries the reason for the reporter (and never their ad
   assert.deepEqual([done.outcome, done.notice, done.title], ['Resolved', 'The file was replaced and the new one is ready.', 'Show S02E01']);
   assert.ok(!JSON.stringify(changes()).includes('example.com'), 'no address anywhere in the log');
   assert.ok(!(await run(issue(84, tv, { createdBy: erin }), { ...off, dryRun: true })).length);
+});
+
+test('open issues Reportarr skipped are closed with a note: a new no-file report at once, old skipped ones on the next poll, once a day, never for the reporter\'s email', async () => {
+  const sf = path.join(process.env.DATA_DIR, 'state.json'), before = fs.readFileSync(sf, 'utf8'), day = new Date().toLocaleDateString('en-CA'), hour = new Date().toISOString().slice(0, 13);
+  const log = (id, detail) => ({ id: `old-${id}`, time: new Date().toISOString(), status: 'skipped', reportId: `overseerr:${id}`, source: 'Overseerr issue', detail });
+  const erin = { id: 11, plexUsername: 'erin', email: 'erin@example.com' }, nothing = { tmdbId: 1, tvdbId: null, mediaType: 'movie' };
+  saveConfig({ sources: [{ ...SRC, wholeSeries: false }], dryRun: false, arrs: base.arrs, maxPerHour: 1000, notifications: [] });
+  // a new report with no file: closed straight away, and the reporter is told
+  const w = await run(issue(90, nothing, { createdBy: erin }));
+  assert.deepEqual(w, ['POST overseerr /api/v1/issue/90/comment', 'POST overseerr /api/v1/issue/90/resolved']);
+  assert.match(lastComment, /No file was found for this title/);
+  assert.match(changes().at(-1).detail, /no Sonarr\/Radarr instance has a file for this title; closed it/);
+  assert.equal(changes().at(-1).retry, undefined, 'closed, so nothing to retry');
+  // old ones from earlier versions: skipped and still open
+  fs.writeFileSync(sf, JSON.stringify({ seen: ['overseerr:91', 'overseerr:92', 'overseerr:93', 'overseerr:94'], hour, count: 0, sources: ['overseerr'], baseline: [], pending: [], day }));
+  const rows = [log(91, 'Overseerr issue #91: no Sonarr/Radarr instance has a file for this title'), log(92, 'Overseerr issue #92: reported against the whole series, which is not replaced automatically'),
+    log(93, 'Overseerr issue #93: no Sonarr/Radarr instance has a file for this title'), log(94, 'Overseerr issue #94: reported against the whole series; closed it and asked for the particular episode')];
+  fs.writeFileSync(path.join(process.env.DATA_DIR, 'changes.json'), JSON.stringify([...changes(), ...rows]));
+  issues = [issue(91, nothing, { createdBy: erin }), issue(92, tv, { createdBy: erin }), issue(93, movie), issue(94, tv)]; // 93: the library has the file now
+  try {
+    calls.length = 0; await poll();
+    const posts = calls.filter((c) => c.startsWith('POST overseerr'));
+    assert.ok(posts.includes('POST overseerr /api/v1/issue/91/resolved') && posts.includes('POST overseerr /api/v1/issue/92/resolved'), 'the old no-file and whole-series ones are closed');
+    assert.ok(!posts.some((c) => /issue\/(93|94)\//.test(c)), 'the one the library has now, and the one already closed, are left alone');
+    assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')).seen.filter((id) => id === 'overseerr:93'), [], '93 is handled normally by the next poll');
+    const closed = changes().filter((r) => r.reportId === 'overseerr:92' && /closed it$/.test(r.detail)).at(-1);
+    assert.deepEqual([closed.status, closed.outcome, closed.notice], ['denied', 'Denied', 'Series report. Report a season or 1 file.']);
+    assert.ok(!JSON.stringify(changes()).includes('erin@example.com'), 'no address in the log');
+    calls.length = 0; await poll();
+    assert.ok(!calls.some((c) => /issue\/(91|92)\//.test(c)), 'each is tried once a day');
+    // whole-series switched on: Retry would replace the series, so the old skip is not closed
+    fs.writeFileSync(sf, JSON.stringify({ seen: ['overseerr:95'], hour, count: 0, sources: ['overseerr'], baseline: [], pending: [], day }));
+    fs.writeFileSync(path.join(process.env.DATA_DIR, 'changes.json'), JSON.stringify([log(95, 'Overseerr issue #95: reported against the whole series, which is not replaced automatically')]));
+    issues = [issue(95, tv)];
+    saveConfig({ sources: [SRC] });
+    calls.length = 0; await poll();
+    assert.ok(!calls.some((c) => /issue\/95\//.test(c)));
+  } finally { issues = []; fs.writeFileSync(sf, before); saveConfig({ sources: [SRC] }); }
 });
 
 test('a report naming no season replaces every episode with a file, in every season', async () => {
