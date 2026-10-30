@@ -84,8 +84,9 @@ test('subtitle issues, whole-series issues with that switched off, and unknown t
   assert.deepEqual(await run(issue(7, { tmdbId: 1, tvdbId: null, mediaType: 'movie' })), []);
   const last = changes().slice(-3).map((r) => r.status + ': ' + r.detail);
   assert.match(last[0], /subtitles issues are not set/);
+  assert.equal(changes().slice(-3)[0].status, 'denied', 'refused by settings, so Denied');
   assert.match(last[1], /Replace whole series/);
-  assert.equal(changes().find((r) => r.reportId === 'overseerr:6' && r.status === 'skipped').retry, 'report', 'left open, it can be retried once the switch is on');
+  assert.equal(changes().find((r) => r.reportId === 'overseerr:6' && r.status === 'denied').retry, 'report', 'left open, it can be retried once the switch is on');
   assert.match(last[2], /no Sonarr\/Radarr instance/);
 });
 
@@ -151,7 +152,7 @@ test('with whole series off, the issue is closed with a note asking for the part
   assert.equal(row.retry, undefined, 'the issue is closed, so there is nothing to retry');
   assert.deepEqual(await run(issue(41, tv), { ...off, dryRun: true }), [], 'a dry run does not touch Seerr');
   assert.equal(changes().at(-1).retry, 'report');
-  assert.equal(changes().at(-1).status, 'skipped', 'nothing was told to the reporter, so it is only skipped');
+  assert.equal(changes().at(-1).status, 'denied', 'refused by the setting even though Seerr was left alone');
 });
 
 test('a report naming no season replaces every episode with a file, in every season', async () => {
@@ -159,21 +160,27 @@ test('a report naming no season replaces every episode with a file, in every sea
   assert.deepEqual(w, ['DELETE sonarr /api/v3/episodefile/101', 'DELETE sonarr /api/v3/episodefile/102', 'DELETE sonarr /api/v3/episodefile/103']);
 });
 
-test('a report is replaced whole or not at all: it waits for room, or is skipped when it can never fit', async () => {
-  const sf = path.join(process.env.DATA_DIR, 'state.json'), before = fs.readFileSync(sf, 'utf8'), today = new Date().toISOString().slice(0, 10);
-  fs.writeFileSync(sf, JSON.stringify({ seen: ['overseerr:31'], day: today, count: 4, sources: ['overseerr'], baseline: [], pending: [] }));
+test('a report bigger than this hour\'s limit carries on as the limit resets, and resolves only once all of it is back', async () => {
+  const sf = path.join(process.env.DATA_DIR, 'state.json'), before = fs.readFileSync(sf, 'utf8'), hour = new Date().toISOString().slice(0, 13);
+  const saved = () => JSON.parse(fs.readFileSync(sf, 'utf8')), pend = () => saved().pending.find((p) => p.ref === 31);
+  fs.writeFileSync(sf, JSON.stringify({ seen: [], hour, count: 0, sources: ['overseerr'], baseline: [], pending: [] }));
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs, maxPerHour: 2 });
+  issues = [];
   try {
-    assert.deepEqual(await run(issue(31, tv), { ...base, maxPerDay: 5 }), [], 'three files do not fit in the one left today: nothing is deleted');
-    assert.match(changes().at(-1).detail, /3 files need more than the 1 left today/);
-    assert.deepEqual(JSON.parse(fs.readFileSync(sf, 'utf8')).seen, [], 'it will be looked at again on a later poll');
-    await run(issue(31, tv), { ...base, maxPerDay: 5 });
-    assert.equal(changes().filter((r) => r.reportId === 'overseerr:31').length, 1, 'the waiting row is logged once a day, not every poll');
-    assert.deepEqual(await run(issue(32, tv), { ...base, maxPerDay: 2 }), []);
-    assert.match(changes().at(-1).detail, /3 files, more than the daily limit of 2/);
-    assert.equal(changes().at(-1).retry, 'report');
-    fs.writeFileSync(sf, JSON.stringify({ seen: [], day: today, count: 0, sources: ['overseerr'], baseline: [], pending: [] }));
-    assert.equal((await run(issue(33, tv), { ...base, maxPerDay: 5 })).filter((c) => c.startsWith('DELETE')).length, 3, 'with room, it all goes');
-  } finally { fs.writeFileSync(sf, before); }
+    const first = (await run(issue(31, tv), { ...base, maxPerHour: 2 })).filter((c) => c.startsWith('DELETE'));
+    assert.deepEqual(first, ['DELETE sonarr /api/v3/episodefile/101', 'DELETE sonarr /api/v3/episodefile/102'], 'two now, as the limit allows');
+    assert.match(lastComment, /Replaced 2 of 3 files so far/);
+    assert.equal(pend().backlog.length, 1, 'the third waits');
+    calls.length = 0; await poll();
+    assert.ok(!calls.some((c) => c.startsWith('DELETE')), 'paused while the limit is used up');
+    fs.writeFileSync(sf, JSON.stringify({ ...saved(), hour: '2000-01-01T00' })); // the hour turns over
+    calls.length = 0; await poll();
+    assert.deepEqual(calls.filter((c) => c.startsWith('DELETE')), ['DELETE sonarr /api/v3/episodefile/103'], 'and carries on');
+    assert.equal(pend().backlog.length, 0);
+    assert.ok(!calls.some((c) => c.includes('/issue/31/resolved')), 'not resolved until every file is back');
+    imported = true; calls.length = 0; await poll();
+    assert.ok(calls.includes('POST overseerr /api/v1/issue/31/resolved'));
+  } finally { imported = false; fs.writeFileSync(sf, before); saveConfig({ maxPerHour: 1000 }); }
 });
 
 test('every step of a replacement is logged against the report and the file, and the comment is signed', async () => {

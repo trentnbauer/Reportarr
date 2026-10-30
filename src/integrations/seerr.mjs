@@ -81,7 +81,7 @@ const seerr = {
     const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${issue.id}`;
     const base = { reportId: report.id, source: seerr.reportLabel(report) };
     if (!(src.issueTypes ?? DEFAULT_TYPES).split(',').map((t) => t.trim().toLowerCase()).includes(type)) {
-      return record({ status: 'skipped', ...base, detail: `${what}: ${type} issues are not set to be replaced` });
+      return record({ status: 'denied', ...base, detail: `${what}: ${type} issues are not set to be replaced` }); // refused by settings; Seerr is left alone, someone else may fix it
     }
     if (issue.media.mediaType === 'tv' && !issue.problemSeason && src.wholeSeries === false) {
       // Not replacing a whole series: close the issue and ask for the particular episode. Left alone (with a Retry) in a dry run, or when
@@ -94,33 +94,34 @@ const seerr = {
           closed = true;
         } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not close it: ${e.message}` }); }
       }
-      return record({ status: closed ? 'denied' : 'skipped', ...base, ...(closed ? {} : { retry: 'report' }),
+      return record({ status: 'denied', ...base, ...(closed ? {} : { retry: 'report' }),
         detail: closed ? `${what}: reported against the whole series; closed it and asked for the particular episode` : `${what}: reported against the whole series ("Replace whole series" is off)` });
     }
     const hits = await ctx.locateIssue(issue);
     if (!hits.length) return record({ status: 'skipped', ...base, detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
-    // A report is replaced whole or not at all: half a series, left open for good, is worse than waiting for the daily limit.
-    const room = ctx.allowance();
-    if (!c.dryRun && hits.length > room) {
-      if (hits.length > c.maxPerDay) return record({ status: 'skipped', ...base, retry: 'report', detail: `${what}: ${hits.length} files, more than the daily limit of ${c.maxPerDay}: raise MAX_PER_DAY to replace it` });
-      return ctx.defer(report, `${what}: ${hits.length} files need more than the ${room} left today: waiting for the daily count to reset`);
-    }
-    let capped = false;
-    const items = [];
-    for (const hit of hits) { const done = await ctx.swap(report, hit.title, hit); if (done === false) capped = true; else if (done) items.push(done); }
-    if (c.dryRun || src.resolve === false || capped) return; // capped: leave the issue open, not every file was replaced
+    // As many files as this hour's limit allows now; the rest wait in the report's backlog and carry on as the limit resets.
+    const room = c.dryRun ? hits.length : ctx.allowance();
+    const later = [], items = [];
+    for (const [i, hit] of hits.entries()) { if (i >= room) { later.push(hit); continue; } const done = await ctx.swap(report, hit.title, hit); if (done === false) later.push(hit); else if (done) items.push(done); }
+    if (c.dryRun || (src.resolve === false && !later.length)) return;
     // The issue is resolved later, by finish(), once Sonarr/Radarr have the new file(s): Seerr tells the reporter when it is resolved.
-    try {
-      await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed(`Replaced ${hits.length} file(s) and started re-downloading ${hits.length === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${hits.length === 1 ? 'file is' : 'files are'} imported.`) });
-    } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment: ${e.message}` }); }
-    if (items.length) {
-      ctx.watch(report, items);
-      record({ status: 'replacing', ...base, detail: `${what}: waiting for ${items.length} replacement file(s) before resolving` });
+    if (src.resolve !== false) {
+      const total = items.length + later.length;
+      try {
+        await api(src, 'POST', `/issue/${issue.id}/comment`, { message: signed(later.length
+          ? `Replaced ${items.length} of ${total} files so far; the rest follow as Reportarr's hourly limit allows. This issue will be resolved once all of the new files are imported.`
+          : `Replaced ${total} file(s) and started re-downloading ${total === 1 ? 'it' : 'them'}. This issue will be resolved once the new ${total === 1 ? 'file is' : 'files are'} imported.`) });
+      } catch (e) { record({ status: 'error', ...base, detail: `${what}: could not comment: ${e.message}` }); }
+    }
+    if (items.length || later.length) {
+      ctx.watch(report, items, later);
+      record({ status: 'replacing', ...base, detail: `${what}: waiting for ${items.length} replacement file(s)${later.length ? ` and ${later.length} more to replace as the hourly limit allows` : ''} before resolving` });
     }
   },
 
   // Called by the engine when every replacement file is back.
   async finish({ record }, src, p) {
+    if (src.resolve === false) return; // only carried a backlog: nothing to tell Seerr
     const what = `${src.name === 'overseerr' ? 'Overseerr' : src.name} issue #${p.ref}`;
     await api(src, 'POST', `/issue/${p.ref}/resolved`);
     record({ status: 'resolved', reportId: p.reportId, source: p.source, detail: `${what}: replacement imported, resolved` });

@@ -94,13 +94,14 @@ test('one source failing is reported but does not stop the others; a source with
 
 test('today\'s count and the limit are reported, and the count resets on a new day', async () => {
   const { port, s } = await new Promise((r) => { process.env.UI_PORT = '0'; const s = serve(); s.once('listening', () => { s.unref(); r({ port: s.address().port, s }); }); });
-  const get = async () => (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()).today;
+  const get = async () => (await (await fetch(`http://127.0.0.1:${port}/api/state`)).json()).limit;
   const stateFile = path.join(process.env.DATA_DIR, 'state.json');
   const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-  assert.deepEqual(await get(), { count: st.count, max: 20 });
-  assert.equal(st.count, 0, 'the dry runs above do not use up the daily cap');
-  fs.writeFileSync(stateFile, JSON.stringify({ ...st, day: '2000-01-01', count: 99 }));
-  assert.deepEqual(await get(), { count: 0, max: 20 });
+  const usage = async () => { const { resetsAt, ...u } = await get(); assert.ok(Date.parse(resetsAt) > Date.now() && Date.parse(resetsAt) - Date.now() <= 3600_000, 'it restarts within the hour'); return u; };
+  assert.deepEqual(await usage(), { count: st.count, max: 10 });
+  assert.equal(st.count, 0, 'the dry runs above do not use up the hourly limit');
+  fs.writeFileSync(stateFile, JSON.stringify({ ...st, hour: '2000-01-01T00', count: 99 }));
+  assert.deepEqual(await usage(), { count: 0, max: 10 });
   s.close();
 });
 
@@ -118,21 +119,21 @@ test('two Overseerr instances can both have an issue #5; the first keeps the old
 test('live: the cap counts real replacements and delays (never drops) new reports; the baseline survives a lost log; a failed report can be retried', async () => {
   const stateFile = path.join(process.env.DATA_DIR, 'state.json'), st = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   const lose = () => fs.writeFileSync(path.join(process.env.DATA_DIR, 'changes.json'), '[]'); // the log rolls over, or is lost
-  const newDay = () => fs.writeFileSync(stateFile, JSON.stringify({ ...st(), day: '2000-01-01' }));
+  const newDay = () => fs.writeFileSync(stateFile, JSON.stringify({ ...st(), hour: '2000-01-01T00' })); // the hour turns over
   const replaced = () => changes().filter((r) => r.status === 'replaced').map((r) => r.reportId);
-  saveConfig({ dryRun: false, maxPerDay: 1, sources: [{ name: 'plex', kind: 'plex', url: url(plexA), key: T.acct }] });
+  saveConfig({ dryRun: false, maxPerHour: 1, sources: [{ name: 'plex', kind: 'plex', url: url(plexA), key: T.acct }] });
   reports[T.acct].push(report('cap-1', 'machine-a', 10, '2026-10-30T01:00'), report('cap-2', 'machine-a', 10, '2026-10-30T02:00'));
   lose(); newDay(); await poll();
   assert.deepEqual(replaced(), ['cap-1']);
-  assert.match(changes().at(-1).detail, /daily cap 1 reached; 1 new report\(s\) wait until tomorrow/);
+  assert.match(changes().at(-1).detail, /hourly limit 1 reached; 1 new report\(s\) wait until the next hour/);
   assert.ok(!st().seen.includes('cap-2'), 'the second report waits');
   lose(); newDay(); await poll();
-  assert.deepEqual(replaced(), ['cap-2'], 'and is handled when the cap resets');
+  assert.deepEqual(replaced(), ['cap-2'], 'and is handled when the limit resets');
 
   // old-a was open on day one; losing the log must neither hide it nor bring back reports already handled
   lose(); await poll();
   assert.equal(status.historic, 1);
-  saveConfig({ maxPerDay: 5 }); requestHistoric(); await poll();
+  saveConfig({ maxPerHour: 5 }); requestHistoric(); await poll();
   assert.deepEqual(replaced(), ['old-a']);
   lose(); await poll();
   assert.equal(status.historic, 0, 'a replaced report never counts as historic again');

@@ -287,7 +287,7 @@ const locked = (k) => state.locked.includes(k);
 
 function newDraft() {
   const c = state.config;
-  draft = { pollSeconds: c.pollSeconds, maxPerDay: c.maxPerDay, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
+  draft = { pollSeconds: c.pollSeconds, maxPerHour: c.maxPerHour, dryRun: c.dryRun, hideLoginWarning: c.hideLoginWarning };
   for (const l of LISTS) draft[l] = c[l].map((x) => ({ ...x, _id: ++uid }));
 }
 const find = (list, id) => draft[list].find((x) => x._id === +id);
@@ -334,13 +334,13 @@ $('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) lo
 // ---- activity tab
 function paintActivity() {
   const bad = failing(), issues = bad.length + (state.status.lastError ? 1 : 0);
-  const t = state.today, pct = t.max ? Math.min(100, Math.round((t.count / t.max) * 100)) : 100;
+  const t = state.limit, pct = t.max ? Math.min(100, Math.round((t.count / t.max) * 100)) : 100, resetMin = Math.max(1, Math.round((Date.parse(t.resetsAt) - Date.now()) / 60000));
   const chips = LISTS.flatMap((l) => state.config[l].map((x) => [l, x]))
     .map(([l, x]) => { const h = healthOf(l, x.name); return `<span class="chip" title="${esc(h?.message ?? 'not checked yet')}"><span class="dot ${dotClass(h)}"></span>${esc(x.name)}</span>`; }).join('');
   $('strip').innerHTML = `
     <div class="cell"><div class="lbl">Polling</div><div class="big dotted"><span class="pulse" style="background:var(${issues ? '--accent' : '--ok'})"></span>${issues ? `Running, ${issues} issue${issues === 1 ? '' : 's'}` : 'Healthy'}</div>
       <div class="sub">${state.status.lastPoll ? `Last poll ${esc(rel(state.status.lastPoll))} · every ${state.pollSeconds} s` : 'Waiting for the first poll'}</div></div>
-    <div class="cell"><div class="lbl">Today</div><div class="big">${t.count}<small>of ${t.max} replacements</small></div><div class="bar"><div style="width:${pct}%"></div></div></div>
+    <div class="cell"><div class="lbl">This hour</div><div class="big">${t.count}<small>of ${t.max} replacements</small></div><div class="bar"><div style="width:${pct}%"></div></div><div class="sub">${t.count >= t.max ? `Limit reached: paused, resumes in ${resetMin} min` : `Resets in ${resetMin} min`}</div></div>
     <div class="cell"><div class="lbl">Connections</div><div class="chips">${chips || '<span class="sub">Nothing configured yet</span>'}</div></div>`;
 
   const eb = $('errbanner');
@@ -423,7 +423,7 @@ function paintLifecycle() {
     const full = x.kind === 'resolved', dl = full ? [] : dlOf(x.id), n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
     return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
       <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
-      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${x.kind === 'skipped' || x.kind === 'denied' ? `<span>${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}</span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${x.kind === 'skipped' || x.kind === 'denied' ? `<span>${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}${(state.status.backlog ?? []).filter((b) => b.reportId === x.id).map((b) => `<span>${b.count} more file${b.count === 1 ? '' : 's'} waiting for the hourly limit</span>`).join('')}</span>
       <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${full || x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
     ${dlList(dl)}<ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
@@ -449,7 +449,7 @@ $('rows').onclick = onRetry; $('lifecycle').addEventListener('click', onRetry);
 $('filters').onclick = (e) => { const b = e.target.closest('[data-filter]'); if (b) { filter = b.dataset.filter; paintActivity(); } };
 $('historicbtn').onclick = async () => {
   const n = state.status.historic;
-  if (!state.config.dryRun && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (up to your daily limit of ${state.config.maxPerDay}). Continue?`)) return;
+  if (!state.config.dryRun && !confirm(`This deletes and re-downloads the file for up to ${n} report(s) that were already open before Reportarr started (as your hourly limit of ${state.config.maxPerHour} allows, over several hours if need be). Continue?`)) return;
   const r = await fetch(api('historic'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   $('historicbtn').dataset.started = '1'; $('historicbtn').textContent = r.ok ? 'Started · see table' : 'Failed to start';
 };
@@ -489,7 +489,7 @@ const SECTIONS = {
   sources: ['Plex & Overseerr / Seerr', 'Where reports come from. Every instance is polled; a report is matched to whichever *arr owns the file.', 'Add at least one Plex or Overseerr / Seerr instance so Reportarr has reports to act on.'],
   arrs: ['Sonarr / Radarr / Lidarr', 'Environment instances are read-only. Ones you add are kept alongside them.', 'Add a Sonarr, Radarr or Lidarr instance so Reportarr has somewhere to replace files.'],
   clients: ['Download clients', 'Moves replacements to the top of the queue. Matched to the client Sonarr/Radarr uses by host:port, or name.', 'No download clients. Replacements are still searched, just not moved to the top of the queue.'],
-  notifications: ['Discord & email', 'Tells you when Reportarr replaces a file, a report fails, or the daily cap is reached. Each channel picks its own events.', 'No notification channels. Add Discord or SMTP email to hear about replacements and failures.'],
+  notifications: ['Discord & email', 'Tells you when Reportarr replaces a file, a report fails, or the hourly limit is reached. Each channel picks its own events.', 'No notification channels. Add Discord or SMTP email to hear about replacements and failures.'],
 };
 function renderPanel() {
   const p = $('panel');
@@ -497,7 +497,7 @@ function renderPanel() {
     p.innerHTML = `<div class="section"><div class="sechead"><div class="grow"><h3>Behaviour</h3><span class="desc">How often to check and how much can change per day.</span></div></div>
       <div class="fields wide">
         ${field('Poll interval (seconds)', 'number', draft.pollSeconds, { attrs: 'data-top="pollSeconds" min="10"', dis: locked('pollSeconds'), env: locked('pollSeconds') })}
-        ${field('Max replacements per day', 'number', draft.maxPerDay, { attrs: 'data-top="maxPerDay" min="0"', dis: locked('maxPerDay'), env: locked('maxPerDay') })}
+        ${field('Max replacements per hour', 'number', draft.maxPerHour, { attrs: 'data-top="maxPerHour" min="0"', dis: locked('maxPerHour'), env: locked('maxPerHour') })}
       </div>
       <div class="switches tiles">
         ${switchBtn('data-flip="dryRun"', draft.dryRun, 'Dry run', 'Log only, never delete', locked('dryRun'))}
@@ -590,7 +590,7 @@ function refreshCard(list, x) { // only the result and dot, so unsaved typing is
 $('save').onclick = async () => {
   const strip = ({ _id, isNew, keySet, passwordSet, apiKeySet, webhookSet, fromEnv, ...rest }) => rest;
   const patch = Object.fromEntries(LISTS.map((l) => [l, draft[l].filter((x) => !x.fromEnv).map(strip)]));
-  for (const k of ['pollSeconds', 'maxPerDay', 'dryRun', 'hideLoginWarning']) if (!locked(k)) patch[k] = draft[k];
+  for (const k of ['pollSeconds', 'maxPerHour', 'dryRun', 'hideLoginWarning']) if (!locked(k)) patch[k] = draft[k];
   $('save').disabled = true;
   try {
     const r = await fetch(api('config'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
@@ -605,7 +605,7 @@ window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault()
 async function fetchState() { return (await fetch(api('state'))).json(); }
 async function load() { state = await fetchState(); newDraft(); }
 async function refresh() {
-  try { const s = await fetchState(); Object.assign(state, { status: s.status, changes: s.changes, health: s.health, today: s.today, pollSeconds: s.pollSeconds, authEnabled: s.authEnabled, version: s.version }); } catch { return; }
+  try { const s = await fetchState(); Object.assign(state, { status: s.status, changes: s.changes, health: s.health, limit: s.limit, pollSeconds: s.pollSeconds, authEnabled: s.authEnabled, version: s.version }); } catch { return; }
   if (tab === 'activity') { paintHeader(); paintActivity(); } else paintDots();
 }
 function route() { const h = location.hash.slice(1); tab = TABS.some(([k]) => k === h) ? h : 'activity'; showTab(); }

@@ -150,8 +150,8 @@ test('log rows become events; queue-priority failures and repeats of the daily c
   assert.equal(eventOf({ status: 'error', detail: 'priority failed: qBittorrent login failed' }), undefined);
   assert.equal(eventOf({ status: 'info', detail: 'baselined 3 existing reports' }), undefined);
   assert.equal(eventOf({ status: 'dry-run' }), undefined);
-  assert.equal(eventOf({ status: 'info', detail: 'daily cap 20 reached; 2 new report(s) wait until tomorrow' }), 'cap');
-  assert.equal(eventOf({ status: 'skipped', detail: 'daily cap 20 reached: not replaced' }), undefined, 'once a day');
+  assert.equal(eventOf({ status: 'info', detail: 'hourly limit 20 reached; 2 new report(s) wait until the next hour' }), 'cap');
+  assert.equal(eventOf({ status: 'skipped', detail: 'hourly limit 20 reached: not replaced' }), undefined, 'once an hour');
 });
 
 test('events close together are one message, and each channel gets only the events it chose', async () => {

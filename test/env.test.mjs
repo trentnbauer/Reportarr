@@ -85,16 +85,16 @@ test('settings saved by an older version are read as sources and clients, and re
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'reportarr-legacy-'));
   const k = { p: rnd(), o: rnd(), q: rnd() };
   fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ plexUrl: 'http://plex:32400', plexToken: k.p, overseerrUrl: 'http://seerr:5055', overseerrKey: k.o, overseerrTypes: 'video', overseerrResolve: false,
-    qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: k.q, maxPerDay: 9, arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989', key: 'k' }] }));
+    qbitUrl: 'http://qb:8080', qbitUsername: 'admin', qbitPassword: k.q, maxPerHour: 9, arrs: [{ name: 's', kind: 'sonarr', url: 'http://s:8989', key: 'k' }] }));
   const r = inProcess({ DATA_DIR: data }, `
-    const c = m.getConfig(); const before = { sources: c.sources.map((s) => [s.name, s.kind, s.key === ${JSON.stringify(k.p)} || s.key === ${JSON.stringify(k.o)}, s.issueTypes, s.resolve]), clients: c.clients.map((x) => [x.name, !!x.default, x.password === ${JSON.stringify(k.q)}]), max: c.maxPerDay };
-    m.saveConfig({ maxPerDay: 12 });
+    const c = m.getConfig(); const before = { sources: c.sources.map((s) => [s.name, s.kind, s.key === ${JSON.stringify(k.p)} || s.key === ${JSON.stringify(k.o)}, s.issueTypes, s.resolve]), clients: c.clients.map((x) => [x.name, !!x.default, x.password === ${JSON.stringify(k.q)}]), max: c.maxPerHour };
+    m.saveConfig({ maxPerHour: 12 });
     return { before, file: JSON.parse(await (await import('node:fs/promises')).readFile(${JSON.stringify(path.join(data, 'config.json'))}, 'utf8')) };`);
   assert.deepEqual(r.before.sources, [['plex', 'plex', true, null, null], ['overseerr', 'seerr', true, 'video', false]]);
   assert.deepEqual(r.before.clients, [['qbittorrent', true, true]]);
   assert.equal(r.before.max, 9);
   assert.deepEqual(Object.keys(r.file).filter((x) => /^(plex|overseerr|qbit|sab)/.test(x)), [], 'old keys are gone after a save');
-  assert.equal(r.file.maxPerDay, 12);
+  assert.equal(r.file.maxPerHour, 12);
   assert.deepEqual(r.file.sources.map((s) => s.name), ['plex', 'overseerr']);
 });
 
@@ -103,7 +103,7 @@ test('the exported .env reproduces the same settings, including awkward characte
   const { saveConfig, getConfig, envFile } = await import('../src/config.mjs');
   const awkward = `p a#ss$word'"x\\${rnd()}`;
   saveConfig({
-    dryRun: false, maxPerDay: 7, pollSeconds: 90,
+    dryRun: false, maxPerHour: 7, pollSeconds: 90,
     sources: [
       { name: 'plex', kind: 'plex', url: 'http://plex:32400', key: awkward }, { name: 'family room', kind: 'plex', url: 'http://10.0.0.20:32400', key: rnd() },
       { name: 'overseerr', kind: 'seerr', url: 'http://seerr:5055', key: rnd(), issueTypes: 'video,audio', resolve: false }, { name: 'seerr-2', kind: 'seerr', url: 'http://seerr2:5055', key: rnd(), issueTypes: 'other', resolve: true },
@@ -117,7 +117,7 @@ test('the exported .env reproduces the same settings, including awkward characte
   assert.match(text, /PLEX_2_NAME='family room'/);
   assert.match(text, /OVERSEERR_2_NAME=seerr-2/);
   const { c } = loadConfig(parseDotenv(text));
-  for (const k of ['dryRun', 'maxPerDay', 'pollSeconds', 'sources', 'arrs', 'clients']) assert.deepEqual(c[k], original[k], k);
+  for (const k of ['dryRun', 'maxPerHour', 'pollSeconds', 'sources', 'arrs', 'clients']) assert.deepEqual(c[k], original[k], k);
 });
 
 test('the .env download needs the web UI password and carries the saved settings', async () => {

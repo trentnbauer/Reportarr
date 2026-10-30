@@ -17,7 +17,7 @@ const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); write
 export const stateFile = () => dataFile('state.json');
 export const changesFile = () => dataFile('changes.json');
 
-export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [] };
+export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [], backlog: [] };
 // Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
 // *arr instances every few minutes, download clients only when you press Test (logging in over and over can get you banned).
 export const health = {};
@@ -33,10 +33,14 @@ export function record(entry) {
   notifyRow(entry);
 }
 
-// How many replacements today out of the daily limit.
-export const todayCount = (c) => {
-  const s = readJson(stateFile(), {}), today = new Date().toISOString().slice(0, 10);
-  return { count: s.day === today ? s.count ?? 0 : 0, max: c.maxPerDay };
+// The hourly limit is one window per clock hour (UTC): the count restarts at the top of the hour.
+// shortcut: a burst either side of the top of the hour can be twice the limit within minutes, use a rolling window if that matters.
+const hourKey = () => new Date().toISOString().slice(0, 13);
+const nextHour = () => { const d = new Date(); d.setUTCMinutes(0, 0, 0); return new Date(d.getTime() + 3600_000).toISOString(); };
+// How many replacements this hour out of the hourly limit, and when the count restarts.
+export const limitUsage = (c) => {
+  const s = readJson(stateFile(), {});
+  return { count: s.hour === hourKey() ? s.count ?? 0 : 0, max: c.maxPerHour, resetsAt: nextHour() };
 };
 
 // Health entries for what is configured now (a removed source or instance must not linger).
@@ -103,21 +107,22 @@ const matches = (m) => (r) => Object.entries(m).every(([k, v]) => r[k] === v);
 const prioritizeLater = (c, a, match, title, base) => prioritize(c, a, matches(match), title)
   .catch((e) => record({ status: 'error', ...base, title, instance: a.name, detail: 'priority failed: ' + e.message, retry: 'priority', match }));
 
-// The daily cap: s.count is how many items (an episode, a movie, an album) were really replaced today.
+// The hourly limit: s.count is how many items (an episode, a movie, an album) were really replaced this hour.
 const capFull = (c, s) => {
-  const today = new Date().toISOString().slice(0, 10);
-  if (s.day !== today) Object.assign(s, { day: today, count: 0 });
-  return s.count >= c.maxPerDay;
+  if (s.hour !== hourKey()) Object.assign(s, { hour: hourKey(), count: 0 });
+  return s.count >= c.maxPerHour;
 };
+// How many more replacements this hour's limit allows (unlimited when none is set).
+const allowance = (c, s) => { if (!Number.isFinite(c.maxPerHour)) return Infinity; capFull(c, s); return Math.max(0, c.maxPerHour - (s.count ?? 0)); };
 
 // Delete the file(s), blocklist the release they came from, search again and push the new grab to the top of the queue.
-// Returns false when the daily cap stopped it, else (outside dry-run) what to follow while the replacement arrives.
+// Returns false when the hourly limit stopped it, else (outside dry-run) what to follow while the replacement arrives.
 async function swap(c, s, report, title, hit) {
   const { a } = hit, ids = hit.fileIds ?? [hit.fileId], plan = ARRS[a.kind].plan(hit);
   const base = { reportId: report.id, source: labelOf(report), title, instance: a.name, file: hit.file };
   const files = ids.length === 1 ? `file ${ids[0]}` : `${ids.length} files`;
   if (c.dryRun) return record({ status: 'dry-run', ...base, detail: `would delete ${files}, blocklist, search` });
-  if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `daily cap ${c.maxPerDay} reached: not replaced` }); return false; }
+  if (capFull(c, s)) { record({ status: 'skipped', ...base, detail: `hourly limit ${c.maxPerHour} reached: not replaced` }); return false; }
   s.count++;
   writeJson(stateFile(), s); // counted before deleting: a crash must not let the cap be exceeded
   const hist = await arr(a, 'GET', plan.hist);
@@ -136,18 +141,14 @@ const context = (c, s) => ({
   locateFromPlex: (m, files, plexGet) => locateFromPlex(c, m, files, plexGet),
   locateIssue: (issue) => locateIssue(c, issue),
   swap: (report, title, hit) => swap(c, s, report, title, hit),
-  // How many more replacements today's daily limit allows (unlimited when none is set).
-  allowance: () => { if (!Number.isFinite(c.maxPerDay)) return Infinity; capFull(c, s); return Math.max(0, c.maxPerDay - (s.count ?? 0)); },
-  // Not now: forget that the report was seen, so a later poll handles it again once there is room (the row is logged once a day).
-  defer: (report, detail) => {
-    s.seen = s.seen.filter((id) => id !== report.id);
-    const day = new Date().toISOString().slice(0, 10);
-    if ((s.deferred ??= {})[report.id] !== day) { s.deferred[report.id] = day; record({ status: 'info', reportId: report.id, source: labelOf(report), detail }); }
-    writeJson(stateFile(), s);
-  },
+  allowance: () => allowance(c, s),
   // Ask for this report to be finished (source.finish) once every item has its new file back; see checkPending.
-  watch: (report, items) => {
-    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, items, since: new Date().toISOString() });
+  watch: (report, items, later = []) => {
+    // later: files of this report the hourly limit did not leave room for. They wait here, slimmed down to what swap() needs,
+    // and carry on as the limit resets (see resume()); the report is not finished until they are all through.
+    const slim = ({ a, ep, movie, ...h }) => ({ ...h, arr: a.name, ...(ep && { ep: { id: ep.id } }), ...(movie && { movie: { id: movie.id } }) });
+    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, items,
+      backlog: later.map(slim), ...(later.length ? { hadBacklog: true } : {}), since: new Date().toISOString() });
     writeJson(stateFile(), s);
   },
 });
@@ -175,7 +176,19 @@ const progressOf = (q) => {
 };
 
 // Moves the items on as far as they have got; true when every one is available.
-async function advance(c, p, base, queues) {
+// A report too big for this hour's limit carries on as the limit allows: the rest of its files wait in p.backlog.
+async function resume(c, s, p) {
+  const report = { id: p.reportId, kind: p.kind, source: p.source, src: c.sources.find((x) => x.name === p.source), issue: { id: p.ref, issueType: p.issueType } };
+  while (p.backlog.length && allowance(c, s) > 0) {
+    const h = p.backlog.shift(), a = c.arrs.find((x) => x.name === h.arr);
+    if (!a) { record({ status: 'error', reportId: p.reportId, source: p.source, title: h.title, detail: `${h.arr} is no longer configured: ${h.title} was not replaced` }); continue; }
+    try { const item = await swap(c, s, report, h.title, { ...h, a }); if (item) p.items.push(item); } catch (e) { record({ status: 'error', reportId: p.reportId, source: p.source, title: h.title, instance: a.name, detail: `${h.title} was not replaced: ${e.message}` }); }
+  }
+  if (!p.backlog.length && p.hadBacklog) { p.since = new Date().toISOString(); delete p.hadBacklog; } // the wait for downloads starts now, not when the report came in
+}
+
+async function advance(c, s, p, base, queues) {
+  if (p.backlog?.length) await resume(c, s, p);
   const plex = c.sources.find((x) => x.kind === 'plex' && SOURCES.plex.isConfigured(x));
   let all = true;
   for (const it of p.items) {
@@ -204,7 +217,7 @@ async function advance(c, p, base, queues) {
     }
     if (it.stage !== 'available') all = false;
   }
-  return all;
+  return all && !p.backlog?.length;
 }
 
 // Replacements wait here until every item is available, then the source finishes the report (Seerr resolves the issue).
@@ -214,10 +227,10 @@ export async function checkPending(c, s) {
   for (const p of s.pending ?? []) {
     const src = c.sources.find((x) => x.name === p.source), base = { reportId: p.reportId, source: p.source };
     if (!src) { record({ status: 'error', ...base, detail: `${p.source} is no longer configured: not waiting for its replacement` }); continue; }
-    if (Date.now() - Date.parse(p.since) > PENDING_MAX_MS) { record({ status: 'skipped', ...base, detail: `no replacement imported within ${PENDING_MAX_MS / 3600_000}h: left open` }); continue; }
+    if (!p.backlog?.length && Date.now() - Date.parse(p.since) > PENDING_MAX_MS) { record({ status: 'skipped', ...base, detail: `no replacement imported within ${PENDING_MAX_MS / 3600_000}h: left open` }); continue; }
     if (p.items.some((i) => !c.arrs.some((a) => a.name === i.arr))) { record({ status: 'error', ...base, detail: 'an *arr instance is no longer configured: not waiting for its replacement' }); continue; }
     try {
-      if (!(await advance(c, p, base, queues))) { keep.push(p); continue; }
+      if (!(await advance(c, s, p, base, queues))) { keep.push(p); continue; }
       await SOURCES[p.kind].finish(context(c, s), src, p);
     } catch (e) {
       if (!p.failed) record({ status: 'error', ...base, detail: `checking the replacement failed (will retry): ${e.message}` });
@@ -277,7 +290,7 @@ export const requestRetry = (id) => { retries.push(id); wake?.(); };
 // First row of a report's life; the UI's "By report" view groups rows by reportId.
 const received = (r) => !readJson(changesFile(), []).some((x) => x.reportId === r.id && x.status === 'reported') && record({ status: 'reported', reportId: r.id, source: labelOf(r), detail: 'report received' });
 
-// Handles one report unless the daily cap is already full. Returns false when it is.
+// Handles one report unless the hourly limit is already full. Returns false when it is.
 async function act(c, s, r) {
   if (capFull(c, s)) return false;
   await handleReport(c, r, s).catch((e) => record({ status: 'error', reportId: r.id, source: labelOf(r), detail: e.message, retry: 'report' }));
@@ -285,7 +298,7 @@ async function act(c, s, r) {
 }
 
 // The Retry button on a failed row: a failed priority step retries only that (the file was already replaced, so
-// redoing the report could delete the new download); any other failure runs the report again, through the daily cap.
+// redoing the report could delete the new download); any other failure runs the report again, through the hourly limit.
 // Older versions saved a failed priority row without a retry field; its message gives it away.
 const retryKind = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)/.test(r.detail ?? '') ? 'report' : undefined);
 
@@ -311,7 +324,7 @@ async function retry(c, s, nodes, id) {
   const r = nodes.find((n) => n.id === row.reportId);
   if (!r) return record({ status: 'skipped', ...base, detail: 'retry: the report is no longer open' });
   record({ status: 'info', ...base, detail: 'retrying the report' });
-  if (!(await act(c, s, r))) record({ status: 'skipped', ...base, detail: `retry: daily cap ${c.maxPerDay} reached`, retry: 'report' });
+  if (!(await act(c, s, r))) record({ status: 'skipped', ...base, detail: `retry: hourly limit ${c.maxPerHour} reached`, retry: 'report' });
 }
 
 // Fetch every configured source; one being down must not stop the others.
@@ -360,9 +373,9 @@ export async function poll() {
   writeJson(stateFile(), s);
   const fresh = nodes.filter((n) => !s.seen.includes(n.id));
   for (const [i, r] of fresh.entries()) {
-    // once the cap is full, new reports wait unseen and are handled when it resets, instead of being dropped
+    // once the limit is full, new reports wait unseen and are handled when it resets, instead of being dropped
     if (capFull(c, s)) {
-      if (s.capNoted !== s.day) { s.capNoted = s.day; record({ status: 'info', detail: `daily cap ${c.maxPerDay} reached; ${fresh.length - i} new report(s) wait until tomorrow` }); }
+      if (s.capNoted !== hourKey()) { s.capNoted = hourKey(); record({ status: 'info', detail: `hourly limit ${c.maxPerHour} reached; ${fresh.length - i} new report(s) wait until the next hour` }); }
       break;
     }
     s.seen.push(r.id);
@@ -376,9 +389,9 @@ export async function poll() {
     const todo = pendingHistoric(nodes, s.baseline);
     record({ status: 'info', detail: `actioning ${todo.length} historic report(s)${c.dryRun ? ' (dry run)' : ''}` });
     for (const r of todo) {
-      if (capFull(c, s)) { record({ status: 'info', detail: 'daily cap reached; the remaining historic reports stay pending' }); break; }
+      if (capFull(c, s)) { record({ status: 'info', detail: 'hourly limit reached; the remaining historic reports stay pending' }); break; }
       received(r);
-      if (!(await act(c, s, r))) { record({ status: 'info', detail: 'daily cap reached; the remaining historic reports stay pending' }); break; }
+      if (!(await act(c, s, r))) { record({ status: 'info', detail: 'hourly limit reached; the remaining historic reports stay pending' }); break; }
       if (!c.dryRun) s.baseline = s.baseline.filter((id) => id !== r.id); // a dry run leaves it pending for the real run
       writeJson(stateFile(), s);
     }
@@ -386,6 +399,7 @@ export async function poll() {
   for (const id of retries.splice(0)) await retry(c, s, nodes, id);
   await checkPending(c, s);
   status.replacing = s.pending.length;
+  status.backlog = s.pending.filter((p) => p.backlog?.length).map((p) => ({ reportId: p.reportId, count: p.backlog.length }));
   // what the By report view shows for downloads in flight: one entry per item being waited for
   status.downloads = s.pending.flatMap((p) => p.items.map((it) => ({ reportId: p.reportId, title: it.title, instance: it.arr, stage: it.stage ?? 'replaced', ...it.progress, pct: reached(it, 'downloaded') ? 100 : it.progress?.pct ?? 0 })));
   const rows = readJson(changesFile(), []);

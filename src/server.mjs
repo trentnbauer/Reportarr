@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
 import { kindsMeta } from './integrations/index.mjs';
-import { status, health, todayCount, currentHealth, readJson, changesFile, requestHistoric, requestRetry, dismissFailures } from './engine.mjs';
+import { status, health, limitUsage, currentHealth, readJson, changesFile, requestHistoric, requestRetry, dismissFailures } from './engine.mjs';
 import { VERSION, log } from './util.mjs';
 
 // BASE_URL is the path the app is served under behind a reverse proxy: "/reportarr", or the full public URL
@@ -78,7 +78,7 @@ export function serve() {
         const c = getConfig();
         return send(200, 'application/json', JSON.stringify({
           config: publicConfig(), locked: lockedKeys(), kinds: kindsMeta(), status, version: VERSION, uiConfigured: hasFileConfig(), authEnabled: !!pass,
-          today: todayCount(c), health: currentHealth(c), pollSeconds: c.pollSeconds,
+          limit: limitUsage(c), health: currentHealth(c), pollSeconds: c.pollSeconds,
           changes: readJson(changesFile(), []).reverse(),
         }));
       }

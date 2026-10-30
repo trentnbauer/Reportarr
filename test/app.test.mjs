@@ -23,9 +23,9 @@ test('ratingKeyOf / idsOf parse Plex references', () => {
 });
 
 test('env wins over the UI and is reported as locked', () => {
-  saveConfig({ pollSeconds: 15, maxPerDay: 3 });
+  saveConfig({ pollSeconds: 15, maxPerHour: 3 });
   assert.equal(getConfig().pollSeconds, 30);
-  assert.equal(getConfig().maxPerDay, 3);
+  assert.equal(getConfig().maxPerHour, 3);
   assert.deepEqual(lockedKeys(), ['pollSeconds']);
 });
 
@@ -145,10 +145,10 @@ test('web server: auth, CSRF and size limits', async () => {
     assert.equal(ok.headers.get('x-frame-options'), 'DENY');
     assert.match(ok.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     // a cross-site form/fetch can send text/plain without a preflight: must be refused
-    assert.equal((await post({ ...basic(S.ui), 'content-type': 'text/plain' }, '{"maxPerDay":1}')).status, 415);
-    assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json', origin: 'https://evil.example' }, '{"maxPerDay":1}')).status, 403);
-    assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json' }, '{"maxPerDay":7}')).status, 200);
-    assert.equal(getConfig().maxPerDay, 7);
+    assert.equal((await post({ ...basic(S.ui), 'content-type': 'text/plain' }, '{"maxPerHour":1}')).status, 415);
+    assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json', origin: 'https://evil.example' }, '{"maxPerHour":1}')).status, 403);
+    assert.equal((await post({ ...basic(S.ui), 'content-type': 'application/json' }, '{"maxPerHour":7}')).status, 200);
+    assert.equal(getConfig().maxPerHour, 7);
     const hist = (h) => fetch(url + '/api/historic', { method: 'POST', headers: { ...basic(S.ui), ...h }, body: '{}' });
     assert.equal((await hist({ 'content-type': 'text/plain' })).status, 415);
     assert.equal((await hist({ 'content-type': 'application/json', origin: 'https://evil.example' })).status, 403);
@@ -214,7 +214,7 @@ test('works under any reverse proxy path prefix, and accepts the browser origin 
   const srv = serve(); await new Promise((r) => srv.once('listening', r));
   const base = `http://127.0.0.1:${srv.address().port}`;
   const auth = { authorization: 'Basic ' + Buffer.from('admin:' + S.ui).toString('base64') };
-  const post = (p, h) => fetch(base + p, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', ...h }, body: '{"maxPerDay":9}' });
+  const post = (p, h) => fetch(base + p, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', ...h }, body: '{"maxPerHour":9}' });
   try {
     // the prefix may or may not be stripped by the proxy: both reach the same handlers
     for (const p of ['/api/state', '/reportarr/api/state', '/media/reportarr/api/state']) assert.equal((await fetch(base + p, { headers: auth })).status, 200, p);
@@ -243,7 +243,7 @@ test('BASE_URL: parsing, redirect to the trailing slash, injected into the page,
   process.env.BASE_URL = 'https://media.example.com/reportarr'; process.env.UI_PORT = '0'; delete process.env.UI_PASSWORD;
   const srv = serve(); await new Promise((r) => srv.once('listening', r));
   const base = `http://127.0.0.1:${srv.address().port}`;
-  const post = (p, h) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...h }, body: '{"maxPerDay":9}' });
+  const post = (p, h) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...h }, body: '{"maxPerHour":9}' });
   try {
     const r = await fetch(base + '/reportarr?x=1', { redirect: 'manual' });
     assert.equal(r.status, 308); assert.equal(r.headers.get('location'), '/reportarr/?x=1');
