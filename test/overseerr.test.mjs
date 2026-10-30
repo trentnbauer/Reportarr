@@ -42,10 +42,12 @@ const sonarr = await listen((req, res) => {
   if (u.pathname === '/api/v3/queue') return json(res, { records: queueRecords });
   res.end();
 });
+let appUrl = 'https://seerr.example.com/'; // what Seerr says its public address is
 let issues = [];
 const overseerr = await listen((req, res) => {
   const u = route('overseerr')(req);
   if (req.headers['x-api-key'] !== KEY) return res.writeHead(403).end();
+  if (u.pathname === '/api/v1/settings/main') return json(res, { applicationUrl: appUrl });
   if (u.pathname === '/api/v1/issue') return json(res, { results: issues });
   if (req.method === 'POST' && u.pathname.endsWith('/comment')) { let b = ''; req.on('data', (d) => (b += d)).on('end', () => { lastComment = JSON.parse(b).message; res.end(); }); return; }
   res.end();
@@ -217,7 +219,7 @@ test('a completed report carries the reason for the reporter (and never their ad
   imported = true; calls.length = 0; await poll(); imported = false;
   const done = changes().find((r) => r.reportId === 'overseerr:83' && r.status === 'resolved');
   assert.deepEqual([done.outcome, done.notice, done.title], ['Resolved', 'The file was replaced and the new one is ready.', 'Show S02E01']);
-  assert.ok(!JSON.stringify(changes()).includes('example.com'), 'no address anywhere in the log');
+  assert.ok(!/erin@example\.com|dana@example\.com/.test(JSON.stringify(changes())), 'no address anywhere in the log');
   assert.ok(!(await run(issue(84, tv, { createdBy: erin }), { ...off, dryRun: true })).length);
 });
 
@@ -257,6 +259,19 @@ test('open issues Reportarr skipped are closed with a note: a new no-file report
     calls.length = 0; await poll();
     assert.ok(!calls.some((c) => /issue\/95\//.test(c)));
   } finally { issues = []; fs.writeFileSync(sf, before); saveConfig({ sources: [SRC] }); }
+});
+
+test('the link in the reporter\'s email is the public address: the source\'s Public URL, else Seerr\'s Application URL, else the one Reportarr uses', async () => {
+  saveConfig({ sources: [SRC], dryRun: false, arrs: base.arrs, maxPerHour: 1000, notifications: [] });
+  issues = [];
+  await poll(); // reads Seerr's Application URL
+  const off = { ...base, sources: [{ ...SRC, wholeSeries: false }] };
+  const link = async (n, cfg) => { await run(issue(n, tv), cfg); return changes().filter((r) => r.reportId === `overseerr:${n}`).at(-1).link; };
+  assert.equal(await link(100, off), 'https://seerr.example.com/issues/100', 'Seerr\'s own Application URL, with the trailing slash dealt with');
+  assert.equal(await link(101, { ...base, sources: [{ ...SRC, wholeSeries: false, publicUrl: 'https://public.example.org/' }] }), 'https://public.example.org/issues/101', 'the source\'s own setting wins');
+  assert.equal(await link(102, { ...base, sources: [{ ...SRC, wholeSeries: false, publicUrl: 'not a url' }] }), 'https://seerr.example.com/issues/102', 'a Public URL that is not an address is ignored');
+  const other = { ...SRC, wholeSeries: false, url: SRC.url.replace('127.0.0.1', 'localhost') }; // a Seerr whose Application URL was never read
+  assert.match(await link(103, { ...base, sources: [other] }), /^http:\/\/localhost:\d+\/issues\/103$/, 'last, the address Reportarr uses');
 });
 
 test('a report naming no season replaces every episode with a file, in every season', async () => {
