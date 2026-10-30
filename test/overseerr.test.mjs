@@ -80,12 +80,12 @@ test('a series without a TVDB id is found by TMDB id', async () => {
 
 test('subtitle issues, whole-series issues with that switched off, and unknown titles are skipped without touching anything', async () => {
   assert.deepEqual(await run(issue(5, movie, { issueType: 3 })), []);
-  assert.deepEqual(await run(issue(6, tv), { ...base, sources: [{ ...SRC, wholeSeries: false }] }), []);
+  assert.deepEqual(await run(issue(6, tv), { ...base, sources: [{ ...SRC, wholeSeries: false, resolve: false }] }), []);
   assert.deepEqual(await run(issue(7, { tmdbId: 1, tvdbId: null, mediaType: 'movie' })), []);
   const last = changes().slice(-3).map((r) => r.status + ': ' + r.detail);
   assert.match(last[0], /subtitles issues are not set/);
   assert.match(last[1], /Replace whole series/);
-  assert.equal(changes().find((r) => r.reportId === 'overseerr:6' && r.status === 'skipped').retry, 'report', 'it can be retried once the switch is on');
+  assert.equal(changes().find((r) => r.reportId === 'overseerr:6' && r.status === 'skipped').retry, 'report', 'left open, it can be retried once the switch is on');
   assert.match(last[2], /no Sonarr\/Radarr instance/);
 });
 
@@ -138,6 +138,18 @@ test('a replacement that never arrives is left open after the wait runs out', as
 test('a bad API key surfaces as an error, not a crash', async () => {
   saveConfig({ sources: [{ ...SRC, key: 'wrong-' + rnd() }] });
   await assert.rejects(poll(), /overseerr: overseerr GET \/issue.* 403/);
+});
+
+test('with whole series off, the issue is closed with a note asking for the particular episode', async () => {
+  const off = { ...base, sources: [{ ...SRC, wholeSeries: false }] };
+  assert.deepEqual(await run(issue(40, tv), off), ['POST overseerr /api/v1/issue/40/comment', 'POST overseerr /api/v1/issue/40/resolved'], 'nothing is deleted');
+  assert.match(lastComment, /particular episode/);
+  assert.match(lastComment, /— Reportarr \(automated system\)$/);
+  const row = changes().at(-1);
+  assert.match(row.detail, /closed it and asked for the particular episode/);
+  assert.equal(row.retry, undefined, 'the issue is closed, so there is nothing to retry');
+  assert.deepEqual(await run(issue(41, tv), { ...off, dryRun: true }), [], 'a dry run does not touch Seerr');
+  assert.equal(changes().at(-1).retry, 'report');
 });
 
 test('a report naming no season replaces every episode with a file, in every season', async () => {

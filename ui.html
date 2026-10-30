@@ -300,7 +300,7 @@ const rel = (iso) => {
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
 // Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
-const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series/.test(r.detail ?? '') ? 'report' : '');
+const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)/.test(r.detail ?? '') ? 'report' : '');
 const DISMISSED = { fixed: 'fixed later', retried: 'retried', expired: 'expired after 7 days', manual: 'dismissed' };
 const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<button type="button" class="btn sm" data-dismiss="${esc(r.id)}" title="Stop counting this as a failure">Dismiss</button>` : '');
 const retryBtn = (r) => (retryOf(r) && r.id && !r.retried && !r.dismissed ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
