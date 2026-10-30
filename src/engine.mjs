@@ -208,6 +208,38 @@ export async function checkPending(c, s) {
   s.pending = keep;
 }
 
+// ---- failures that no longer need attention
+// A failed row is not left behind for ever. It is dismissed (kept in the log, no longer counted as a failure) when
+//   fixed: the same report later got through (the file was replaced; for a queue priority, the item was moved or arrived),
+//   retried: you pressed Retry (the retry writes its own rows, and a new failure if it fails again),
+//   expired: it is older than FAILED_MAX_AGE_MS,
+//   manual: you dismissed it.
+// shortcut: a fixed 7 days, make it a setting if failures should be kept longer.
+const FAILED_MAX_AGE_MS = 7 * 86400_000;
+const priorityFailure = (r) => /^priority failed/.test(r.detail ?? '');
+export function clearFailures(rows, now = Date.now()) {
+  let changed = false;
+  rows.forEach((r, i) => {
+    if (r.status !== 'error' || r.dismissed) return;
+    const later = rows.slice(i + 1);
+    const fixed = priorityFailure(r)
+      ? later.some((x) => (x.status === 'prioritized' && x.title === r.title && x.instance === r.instance)
+        || (x.reportId === r.reportId && x.title === r.title && ['downloaded', 'imported', 'available'].includes(x.status)))
+      : !!r.reportId && later.some((x) => x.reportId === r.reportId && ['replaced', 'imported', 'available', 'resolved'].includes(x.status));
+    const reason = r.retried ? 'retried' : fixed ? 'fixed' : now - Date.parse(r.time) > FAILED_MAX_AGE_MS ? 'expired' : '';
+    if (reason) { r.dismissed = reason; changed = true; }
+  });
+  return changed;
+}
+// The Dismiss buttons: one failed row by its id, or every one that is still counted ("all").
+export function dismissFailures(id) {
+  const rows = readJson(changesFile(), []);
+  let n = 0;
+  for (const r of rows) if (r.status === 'error' && !r.dismissed && (id === 'all' || r.id === id)) { r.dismissed = 'manual'; n++; }
+  if (n) writeJson(changesFile(), rows);
+  return n;
+}
+
 // ---- the loop
 // Reports that existed before the app first ran (s.baseline) and are still open: never acted on automatically.
 export const pendingHistoric = (nodes, baseline) => nodes.filter((n) => baseline.includes(n.id));
@@ -335,6 +367,8 @@ export async function poll() {
   for (const id of retries.splice(0)) await retry(c, s, nodes, id);
   await checkPending(c, s);
   status.replacing = s.pending.length;
+  const rows = readJson(changesFile(), []);
+  if (clearFailures(rows)) writeJson(changesFile(), rows);
   writeJson(stateFile(), s);
   status.historic = pendingHistoric(nodes, s.baseline).length;
   return errors.join('; ');

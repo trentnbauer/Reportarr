@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { getConfig, publicConfig, lockedKeys, saveConfig, envFile, hasFileConfig } from './config.mjs';
 import { runCheck } from './checks.mjs';
 import { kindsMeta } from './integrations/index.mjs';
-import { status, health, todayCount, currentHealth, readJson, changesFile, requestHistoric, requestRetry } from './engine.mjs';
+import { status, health, todayCount, currentHealth, readJson, changesFile, requestHistoric, requestRetry, dismissFailures } from './engine.mjs';
 import { VERSION, log } from './util.mjs';
 
 // BASE_URL is the path the app is served under behind a reverse proxy: "/reportarr", or the full public URL
@@ -73,7 +73,7 @@ export function serve() {
       // /reportarr -> /reportarr/ so the page's relative URLs resolve; a proxy that strips the prefix never sends this
       if (prefix && url.pathname === prefix) { res.writeHead(308, { Location: prefix + '/' + url.search }); return res.end(); }
       // Route on the /api/... suffix, so it works under any prefix whether or not the proxy strips it.
-      const route = url.pathname.match(/\/api\/(state|env|config|historic|test|retry)$/)?.[0].slice(5) ?? '';
+      const route = url.pathname.match(/\/api\/(state|env|config|historic|test|retry|dismiss)$/)?.[0].slice(5) ?? '';
       if (route === 'state') {
         const c = getConfig();
         return send(200, 'application/json', JSON.stringify({
@@ -87,7 +87,7 @@ export function serve() {
         res.setHeader('Cache-Control', 'no-store');
         return send(200, 'text/plain; charset=utf-8', envFile());
       }
-      if (req.method === 'POST' && ['config', 'historic', 'test', 'retry'].includes(route)) {
+      if (req.method === 'POST' && ['config', 'historic', 'test', 'retry', 'dismiss'].includes(route)) {
         // A cross-site page can send text/plain without a preflight, so insist on JSON and a same-origin request.
         if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return send(415, 'application/json', '{"error":"content-type must be application/json"}');
         if (req.headers.origin && !sameOrigin(req, baseHost)) return send(403, 'application/json', '{"error":"cross-origin request refused"}');
@@ -98,6 +98,7 @@ export function serve() {
           return send(200, 'application/json', JSON.stringify(result));
         }
         if (route === 'historic') { requestHistoric(); return send(202, 'application/json', '{}'); }
+        if (route === 'dismiss') return send(200, 'application/json', JSON.stringify({ dismissed: dismissFailures(String(JSON.parse(await body(req)).id)) }));
         if (route === 'retry') { requestRetry(String(JSON.parse(await body(req)).id)); return send(202, 'application/json', '{}'); }
         saveConfig(JSON.parse(await body(req)));
         return send(200, 'application/json', '{}');

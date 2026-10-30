@@ -117,7 +117,7 @@
   .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
   .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); }
   .s-replacing, .s-downloading, .s-downloaded, .s-dry { background:var(--accbg); color:var(--acctext); }
-  .s-skipped, .s-other, .s-reported { background:var(--line2); color:var(--neutral); }
+  .s-skipped, .s-other, .s-reported, .s-dismissed { background:var(--line2); color:var(--neutral); }
   .s-failed { background:var(--badbg); color:var(--bad); }
   .item .body { min-width:0; display:flex; flex-direction:column; gap:3px; }
   .item .t { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
@@ -225,7 +225,7 @@
     <div class="errbanner row hidden" id="errbanner"></div>
     <section class="col" style="gap:12px">
       <div class="changes-head row"><h2>Changes</h2><div class="seg views" id="views"></div></div>
-      <div class="toolbar row"><div class="seg" id="filters"></div><input type="search" id="q" class="search" placeholder="Search title, file or report ID"></div>
+      <div class="toolbar row"><div class="seg" id="filters"></div><button type="button" class="btn hidden" id="dismissall"></button><input type="search" id="q" class="search" placeholder="Search title, file or report ID"></div>
       <div class="callout row hidden" id="historic"><span id="historictext"></span><button type="button" class="btn" id="historicbtn"></button></div>
       <div id="lifecycle" class="col lcs hidden"></div>
       <div class="list" id="loglist"><div class="lhead"><span>Status</span><span>Item</span><span>When</span></div><div id="rows"></div><div class="empty hidden" id="empty">Nothing here. Only reports made after Reportarr started are acted on.</div></div>
@@ -290,9 +290,11 @@ const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
 // Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
 const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : '');
-const retryBtn = (r) => (retryOf(r) && r.id && !r.retried ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
-const statusKind = (r) => ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
-const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed' };
+const DISMISSED = { fixed: 'fixed later', retried: 'retried', expired: 'expired after 7 days', manual: 'dismissed' };
+const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<button type="button" class="btn sm" data-dismiss="${esc(r.id)}" title="Stop counting this as a failure">Dismiss</button>` : '');
+const retryBtn = (r) => (retryOf(r) && r.id && !r.retried && !r.dismissed ? `<button type="button" class="btn sm" data-retry="${esc(r.id)}">${retryOf(r) === 'priority' ? 'Retry queue priority' : 'Retry'}</button>` : '');
+const statusKind = (r) => r.status === 'error' && r.dismissed ? 'dismissed' : ({ replaced: 'replaced', replacing: 'replacing', resolved: 'resolved', reported: 'reported', downloading: 'downloading', downloaded: 'downloaded', imported: 'imported', available: 'available', 'dry-run': 'dry', skipped: 'skipped', error: 'failed' }[r.status] ?? 'other');
+const STATUS_LABEL = { replaced: 'Replaced', replacing: 'Replacing', resolved: 'Resolved', reported: 'Reported', downloading: 'Downloading', downloaded: 'Downloaded', imported: 'Imported', available: 'In Plex', dry: 'Dry run', skipped: 'Skipped', failed: 'Failed', dismissed: 'Dismissed' };
 const labelOf = (r) => { const k = statusKind(r); return STATUS_LABEL[k] ?? (r.status === 'prioritized' ? 'Queued first' : r.status.charAt(0).toUpperCase() + r.status.slice(1)); };
 const sourceText = (r) => r.source ?? (String(r.reportId ?? '').startsWith('overseerr:') ? `Overseerr issue #${String(r.reportId).split(':').pop()}` : /^[0-9a-f-]{36}$/.test(r.reportId ?? '') ? 'Plex report' : '');
 const pill = (k, label) => `<span class="status s-${k}"><i></i>${esc(label)}</span>`;
@@ -343,6 +345,9 @@ function paintActivity() {
   $('filters').innerHTML = [['all', 'All'], ['replacing', 'Replacing'], ['replaced', 'Replaced'], ['resolved', 'Resolved'], ['dry', 'Dry run'], ['skipped', 'Skipped'], ['failed', 'Failed']]
     .map(([k, l]) => `<button type="button" data-filter="${k}" class="${filter === k ? 'on' : ''}">${l}<span>${counts[k]}</span></button>`).join('');
 
+  const nFailed = counts.failed;
+  $('dismissall').classList.toggle('hidden', view !== 'log' || !nFailed);
+  $('dismissall').textContent = `Dismiss ${nFailed} failed`;
   const n = state.status.historic;
   $('historic').classList.toggle('hidden', !(n > 0));
   if (n > 0) {
@@ -359,12 +364,16 @@ function paintActivity() {
   const rows = all.filter((r) => (filter === 'all' || statusKind(r) === filter) && match(r));
   $('rows').innerHTML = rows.map((r) => `<div class="item"><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <div class="body"><div class="t"><b>${esc(r.title || (r.status === 'info' ? 'Reportarr' : '—'))}</b><span>${esc(sourceText(r))}</span></div>
-      <div class="meta">${r.instance ? `<code>${esc(r.instance)}</code>` : ''}${r.file ? `<code>${esc(r.file)}</code>` : ''}<span>${esc(r.detail)}</span></div>${retryBtn(r)}</div>
+      <div class="meta">${r.instance ? `<code>${esc(r.instance)}</code>` : ''}${r.file ? `<code>${esc(r.file)}</code>` : ''}<span>${esc(r.detail)}${r.dismissed ? ` (${esc(DISMISSED[r.dismissed] ?? r.dismissed)})` : ''}</span></div>${retryBtn(r)}${dismissBtn(r)}</div>
       <div class="when" title="${esc(new Date(r.time).toLocaleString())}">${esc(rel(r.time))}</div></div>`).join('');
   $('empty').classList.toggle('hidden', rows.length > 0);
 }
 // One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
 const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
+// A report's state follows how far it got, not its last row. A failed queue priority is cosmetic (the download goes ahead
+// anyway) and a dismissed failure is history, so neither counts; any other failure counts only until the report moves on,
+// and once it is resolved nothing can turn it back. The failed rows themselves stay in the timeline.
+const cosmetic = (r) => r.status === 'error' && (r.dismissed || /^priority failed/.test(r.detail ?? ''));
 const lifecycleKind = (has, last) => last === 'error' ? 'failed' : ['resolved', 'available', 'imported', 'downloaded', 'downloading', 'replacing', 'replaced', 'skipped'].find(has) ?? (last === 'dry-run' ? 'dry' : 'reported');
 function lifecycles() {
   const g = new Map();
@@ -372,7 +381,9 @@ function lifecycles() {
   return [...g].map(([id, rows]) => {
     const has = (s) => rows.some((r) => r.status === s), uniq = (k) => [...new Set(rows.map((r) => r[k]).filter(Boolean))];
     const done = Object.fromEntries(STEPS.map(([k]) => [k, has(k)]));
-    return { id, rows, done, kind: lifecycleKind(has, rows[rows.length - 1].status), source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
+    const live = rows.filter((r) => !cosmetic(r));
+    const kind = has('resolved') ? 'resolved' : live.length ? lifecycleKind((s) => live.some((r) => r.status === s), live.at(-1).status) : rows.some((r) => r.status === 'error' && !r.dismissed) ? 'failed' : 'dismissed';
+    return { id, rows, done, kind, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
   }).sort((a, b) => b.time.localeCompare(a.time));
 }
 function paintLifecycle() {
@@ -386,13 +397,16 @@ function paintLifecycle() {
       <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
     <ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
-      <span class="tx">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}${retryBtn(r)}</span></li>`).join('')}</ol></details>`;
+      <span class="tx">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}${retryBtn(r)}${dismissBtn(r)}</span></li>`).join('')}</ol></details>`;
   }).join('') || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
 }
 $('views').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; paintActivity(); } };
 $('q').oninput = (e) => { query = e.target.value; paintActivity(); };
 $('lifecycle').addEventListener('toggle', (e) => { const id = e.target.dataset?.id; if (id) e.target.open ? lcOpen.add(id) : lcOpen.delete(id); }, true);
+const dismiss = async (id) => { await fetch(api('dismiss'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null); await refresh(); };
+$('dismissall').onclick = () => dismiss('all');
 const onRetry = async (e) => {
+  const d = e.target.closest('[data-dismiss]'); if (d) { e.preventDefault(); d.disabled = true; return dismiss(d.dataset.dismiss); }
   const b = e.target.closest('[data-retry]'); if (!b) return;
   e.preventDefault(); // a button inside a card must not toggle it
   if (!state.config.dryRun && b.textContent === 'Retry' && !confirm('This runs the report again, which can delete and re-download its file. Continue?')) return;
