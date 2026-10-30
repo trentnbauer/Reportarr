@@ -370,6 +370,10 @@ function paintActivity() {
 }
 // One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
 const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
+// A report's state follows how far it got, not its last row. A failed queue priority is cosmetic (the download goes ahead
+// anyway) and a dismissed failure is history, so neither counts; any other failure counts only until the report moves on,
+// and once it is resolved nothing can turn it back. The failed rows themselves stay in the timeline.
+const cosmetic = (r) => r.status === 'error' && (r.dismissed || /^priority failed/.test(r.detail ?? ''));
 const lifecycleKind = (has, last) => last === 'error' ? 'failed' : ['resolved', 'available', 'imported', 'downloaded', 'downloading', 'replacing', 'replaced', 'skipped'].find(has) ?? (last === 'dry-run' ? 'dry' : 'reported');
 function lifecycles() {
   const g = new Map();
@@ -377,8 +381,9 @@ function lifecycles() {
   return [...g].map(([id, rows]) => {
     const has = (s) => rows.some((r) => r.status === s), uniq = (k) => [...new Set(rows.map((r) => r[k]).filter(Boolean))];
     const done = Object.fromEntries(STEPS.map(([k]) => [k, has(k)]));
-    const live = rows.filter((r) => !(r.status === 'error' && r.dismissed));
-    return { id, rows, done, kind: live.length ? lifecycleKind(has, live.at(-1).status) : 'dismissed', source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
+    const live = rows.filter((r) => !cosmetic(r));
+    const kind = has('resolved') ? 'resolved' : live.length ? lifecycleKind((s) => live.some((r) => r.status === s), live.at(-1).status) : rows.some((r) => r.status === 'error' && !r.dismissed) ? 'failed' : 'dismissed';
+    return { id, rows, done, kind, source: rows.find((r) => r.source)?.source ?? '', titles: uniq('title'), files: uniq('file'), time: rows[rows.length - 1].time };
   }).sort((a, b) => b.time.localeCompare(a.time));
 }
 function paintLifecycle() {

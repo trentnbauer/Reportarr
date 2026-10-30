@@ -118,7 +118,7 @@ Each card has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr/Lida
 
 ### Failures do not pile up
 
-A failed row (the **Failed** filter and its count) clears itself: when the same report later gets through (its file is replaced; for a queue priority, the download is moved or arrives), when you press **Retry** on it (the retry writes its own rows, and a new failed row if it fails again), or after 7 days. Anything else has a **Dismiss** button, and **Dismiss N failed** clears them all. A dismissed row stays in the log, greyed, with the reason, but no longer counts as a failure and no longer turns a report red in **By report**.
+A failed row (the **Failed** filter and its count) clears itself: when the same report later gets through (its file is replaced; for a queue priority, the download is moved or arrives), when you press **Retry** on it (the retry writes its own rows, and a new failed row if it fails again), or after 7 days. Anything else has a **Dismiss** button, and **Dismiss N failed** clears them all. A dismissed row stays in the log, greyed, with the reason, but no longer counts as a failure and no longer turns a report red in **By report**. Failed rows never hold up a report: a failed queue priority never changes its state (the download goes ahead anyway), any other failure only shows until the report moves on, and once a report is resolved it reads **Resolved** whatever failed rows it has. Those rows stay in its timeline.
 
 ### Notifications
 
