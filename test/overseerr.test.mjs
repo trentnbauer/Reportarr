@@ -106,6 +106,7 @@ test('subtitle issues, whole-series issues with that switched off, and unknown t
   assert.match(last[1], /Replace whole series/);
   assert.equal(changes().find((r) => r.reportId === 'overseerr:6' && r.status === 'denied').retry, 'report', 'left open, it can be retried once the switch is on');
   assert.match(last[2], /no Sonarr\/Radarr instance/);
+  assert.equal(changes().at(-1).retry, 'report', 'a skip for no file can be retried: the library may have it later');
 });
 
 test('dry run and "resolve off" leave Overseerr alone', async () => {
@@ -120,6 +121,7 @@ test('a source configured for the first time is baselined, then only new issues 
   calls.length = 0; await poll();
   assert.ok(!calls.some((c) => c.startsWith('DELETE')), 'existing issue must not be actioned');
   assert.match(changes().at(-1).detail, /baselined 1 existing overseerr/);
+  assert.deepEqual(status.open, ['overseerr:10'], 'the page is told which Seerr issues are open');
   issues = [issue(10, movie), issue(11, tv, { problemSeason: 2, problemEpisode: 1 })];
   calls.length = 0; await poll();
   assert.deepEqual(calls.filter((c) => c.startsWith('DELETE')), ['DELETE sonarr /api/v3/episodefile/103']);

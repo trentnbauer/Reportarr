@@ -113,7 +113,7 @@ const seerr = {
     // Over their daily limit: held until tomorrow (the report is looked at again each poll), or until someone presses Override.
     if (!c.dryRun && ctx.userRoom(report) <= 0) return ctx.hold(report, `${report.user.name} has reached their daily limit of ${c.maxPerUserPerDay}: ${what} is held until tomorrow, or press Override`);
     const hits = await ctx.locateIssue(issue);
-    if (!hits.length) return record({ status: 'skipped', ...base, ...tell(c, report, 'Skipped', 'No file was found for this title, so there was nothing to replace.'), detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
+    if (!hits.length) return record({ status: 'skipped', retry: 'report', ...base, ...tell(c, report, 'Skipped', 'No file was found for this title, so there was nothing to replace.'), detail: `${what}: no Sonarr/Radarr instance has a file for this title` });
     if (subs) for (const h of hits) h.op = 'subtitles';
     // As many files as this hour's limit allows now; the rest wait in the report's backlog and carry on as the limit resets.
     const room = c.dryRun ? hits.length : ctx.allowance(report);

@@ -118,6 +118,7 @@
   .status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
   .s-replaced, .s-resolved, .s-imported, .s-available { background:var(--okbg); color:var(--ok); }
   .s-replacing, .s-downloading, .s-downloaded, .s-dry { background:var(--accbg); color:var(--acctext); }
+  .openbadge { color:var(--acctext) !important; font-weight:600; }
   .s-denied { background:var(--line2); color:var(--bad); }
   .s-held, .s-alert { background:var(--accbg); color:var(--acctext); }
   .s-alertfail { background:var(--badbg); color:var(--bad); }
@@ -277,7 +278,9 @@ let draft = null;       // the settings being edited (not saved until Save)
 let dirty = false, saveMsg = '', saveErr = false;
 let hideDone = false;
 try { hideDone = localStorage.getItem('hideDone') === '1'; } catch {}
-let tab = 'activity', filter = 'all', view = 'log', query = '', lcOpen = new Set(), uid = 0;
+let view = 'report'; // by report is the default view; the last choice is remembered
+try { view = localStorage.getItem('view') || 'report'; } catch {}
+let tab = 'activity', filter = 'all', query = '', lcOpen = new Set(), uid = 0;
 const tests = {};       // card id -> { st: 'testing'|'ok'|'fail', msg }
 const TABS = [['activity', 'Activity'], ['app', 'App settings'], ['sources', 'Sources'], ['arr', '*arr suite'], ['clients', 'Download clients'], ['subtitles', 'Subtitles'], ['notify', 'Notifications']];
 const LIST_OF = { sources: 'sources', arr: 'arrs', clients: 'clients', subtitles: 'subtitles', notify: 'notifications' }; // tab -> the list it edits
@@ -303,7 +306,7 @@ const rel = (iso) => {
 const healthOf = (list, name) => state.health[`${HKEY[list]}:${name}`];
 const dotClass = (h) => (h ? (h.ok === true ? 'ok' : h.ok === false ? 'bad' : 'dim') : 'dim');
 // Rows saved by older versions have no retry field; a failed queue priority is recognised by its message.
-const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)/.test(r.detail ?? '') ? 'report' : '');
+const retryOf = (r) => r.retry ?? (r.status === 'error' && r.instance && /^priority failed/.test(r.detail ?? '') ? 'priority' : r.status === 'skipped' && /reported against the whole series(?!; closed)|no Sonarr\/Radarr instance has a file/.test(r.detail ?? '') ? 'report' : '');
 const DISMISSED = { fixed: 'fixed later', retried: 'retried', expired: 'expired after 7 days', manual: 'dismissed' };
 const overrideBtn = (r) => (r.status === 'held' && r.reportId && !r.overridden ? `<button type="button" class="btn sm" data-override="${esc(r.reportId)}" title="Let this report through the user limit now">Override limit</button>` : '');
 const dismissBtn = (r) => (r.status === 'error' && !r.dismissed && r.id ? `<button type="button" class="btn sm" data-dismiss="${esc(r.id)}" title="Stop counting this as a failure">Dismiss</button>` : '');
@@ -376,7 +379,7 @@ function paintActivity() {
   $('views').innerHTML = [['log', 'Log'], ['report', 'By report']].map(([k, l]) => `<button type="button" data-view="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('');
   $('filters').classList.toggle('hidden', view !== 'log'); $('loglist').classList.toggle('hidden', view !== 'log');
   $('lifecycle').classList.toggle('hidden', view !== 'report');
-  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed'; $('hidedone').title = 'Leaves out reports that are resolved, skipped or denied: nothing more will happen to them';
+  $('hidedone').className = 'btn' + (hideDone ? ' on' : ''); $('hidedone').setAttribute('aria-pressed', hideDone); $('hidedone').textContent = hideDone ? 'Completed hidden' : 'Hide completed'; $('hidedone').title = 'Leaves out reports that are resolved, or skipped or denied and closed in Seerr: nothing more will happen to them. Ones still open in Seerr stay.';
   if (view === 'report') { paintLifecycle(); return; }
   const q = query.trim().toLowerCase();
   const done = hideDone ? new Set(lifecycles().filter(finished).map((x) => x.id)) : new Set(); // reports that are finished
@@ -390,7 +393,10 @@ function paintActivity() {
 }
 // One card per report (its unique ID), oldest event first inside: reported, file replaced, downloading, downloaded, imported, in Plex, resolved.
 const STEPS = [['reported', 'Reported'], ['replaced', 'File replaced'], ['downloading', 'Downloading'], ['downloaded', 'Downloaded'], ['imported', 'Imported'], ['available', 'In Plex'], ['resolved', 'Resolved']];
-const finished = (x) => ['resolved', 'skipped', 'denied'].includes(x.kind); // nothing more will happen to it
+// Reportarr is done with it AND its source has nothing left to do: a skipped or denied Seerr report whose issue is still open in Seerr
+// is not completed, whatever Reportarr decided (it stays visible, marked, and Hide completed leaves it alone).
+const openInSource = (id) => (state.status.open ?? []).includes(id);
+const finished = (x) => x.kind === 'resolved' || (['skipped', 'denied'].includes(x.kind) && !openInSource(x.id));
 // A report's state follows how far it got, not its last row. A failed queue priority is cosmetic (the download goes ahead
 // anyway) and a dismissed failure is history, so neither counts; any other failure counts only until the report moves on,
 // and once it is resolved nothing can turn it back. The failed rows themselves stay in the timeline.
@@ -427,14 +433,14 @@ function paintLifecycle() {
     const full = x.kind === 'resolved', dl = full ? [] : dlOf(x.id), n = full ? STEPS.length : STEPS.filter(([k]) => x.done[k]).length;
     return `<details class="lc ${x.kind === 'failed' ? 'failed' : ''}" data-id="${esc(x.id)}"${lcOpen.has(x.id) ? ' open' : ''}><summary>
       <span class="st">${pill(x.kind, STATUS_LABEL[x.kind] ?? x.kind)}</span>
-      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${x.kind === 'skipped' || x.kind === 'denied' ? `<span>${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}${(state.status.backlog ?? []).filter((b) => b.reportId === x.id).map((b) => `<span>${b.count} more file${b.count === 1 ? '' : 's'} waiting for the hourly limit</span>`).join('')}</span>
+      <span class="who"><b>${esc(x.titles.length > 2 ? `${x.titles[0]} and ${x.titles.length - 1} more` : x.titles.join(', ') || sourceText({ source: x.source, reportId: x.id }) || x.id)}</b><span>${esc(x.source)} · <code>${esc(x.id)}</code></span>${openInSource(x.id) && ['skipped', 'denied'].includes(x.kind) ? '<span class="openbadge">Still open in Seerr</span>' : ''}${x.kind === 'skipped' || x.kind === 'denied' ? `<span>${esc(x.reason.length > 140 ? x.reason.slice(0, 139) + '…' : x.reason)}</span>` : ''}${dlSummary(dl)}${(state.status.backlog ?? []).filter((b) => b.reportId === x.id).map((b) => `<span>${b.count} more file${b.count === 1 ? '' : 's'} waiting for the hourly limit</span>`).join('')}</span>
       <span class="prog"><span class="segs">${STEPS.map(([k, l]) => `<i class="${full || x.done[k] ? 'done' : ''}" title="${esc(l)}"></i>`).join('')}</span><small>${n} of ${STEPS.length} steps</small></span>
       <span class="when" title="${esc(new Date(x.time).toLocaleString())}">${esc(rel(x.time))}<span class="chev">›</span></span></summary>
     ${dlList(dl)}<ol class="tl">${x.rows.map((r) => `<li><span class="tm">${esc(new Date(r.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span><span class="st">${pill(statusKind(r), labelOf(r))}</span>
       <span class="tx">${r.instance ? `<code>${esc(r.instance)}</code> ` : ''}${r.file ? `<code>${esc(r.file)}</code> ` : ''}${esc(r.detail)}${retryBtn(r)}${dismissBtn(r)}${overrideBtn(r)}</span></li>`).join('')}</ol></details>`;
   }).join('') || '<div class="empty">No reports yet. Reports made after Reportarr started appear here with everything that happened to them.</div>';
 }
-$('views').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; paintActivity(); } };
+$('views').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) { view = b.dataset.view; try { localStorage.setItem('view', view); } catch {} paintActivity(); } };
 $('q').oninput = (e) => { query = e.target.value; paintActivity(); };
 $('lifecycle').addEventListener('toggle', (e) => { const id = e.target.dataset?.id; if (id) e.target.open ? lcOpen.add(id) : lcOpen.delete(id); }, true);
 const dismiss = async (id) => { await fetch(api('dismiss'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => null); await refresh(); };
