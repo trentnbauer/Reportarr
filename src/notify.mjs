@@ -5,6 +5,7 @@ import { getConfig } from './config.mjs';
 import { NOTIFIERS } from './integrations/index.mjs';
 import { wants, clip } from './integrations/events.mjs';
 import { log, why } from './util.mjs';
+import { notificationHtml, reporterHtml } from './email.mjs';
 
 const WAIT_MS = 5000;
 const MAX_LINES = 20;
@@ -48,7 +49,8 @@ export async function flush(event) {
   const q = queue.get(event);
   if (!q) return;
   queue.delete(event); clearTimeout(q.timer);
-  const msg = { ...compose(event, q.items), server: getConfig().serverName };
+  const cfg = getConfig(), msg = { ...compose(event, q.items), server: cfg.serverName };
+  msg.html = notificationHtml({ event, rows: q.items, server: cfg.serverName, dryRun: cfg.dryRun, subject: msg.title }); // only the email channels use it
   await Promise.allSettled(getConfig().notifications
     .filter((ch) => NOTIFIERS[ch.kind]?.isConfigured(ch) && wants(ch, event))
     .map((ch) => NOTIFIERS[ch.kind].send(ch, msg).catch((e) => log('notification', ch.name, 'failed:', why(e)))));
@@ -62,6 +64,7 @@ export function notifyReporter(r) {
   try {
     const msg = { event: 'reporter', server: getConfig().serverName, to: [r.reporterEmail], title: `${r.outcome}${r.title ? `: ${r.title}` : ''}`,
       lines: [`${r.outcome} - ${r.notice}`, ...(r.title ? [`About: ${r.title}`] : []), ...(r.link ? [`Your report: ${r.link}`] : [])] };
+    msg.html = reporterHtml(r, { server: msg.server, subject: msg.title });
     return Promise.allSettled(getConfig().notifications
       .filter((ch) => ch.kind === 'smtp' && ch.toReporter === true && NOTIFIERS.smtp.isConfigured(ch))
       .map((ch) => NOTIFIERS.smtp.send(ch, msg).catch((e) => log('notification', ch.name, 'failed to email the reporter:', why(e)))));
@@ -74,7 +77,7 @@ export function notifyRow(row) {
     const event = eventOf(row);
     if (!event || !getConfig().notifications.some((ch) => wants(ch, event))) return;
     const q = queue.get(event) ?? { items: [] };
-    q.items.push(row); queue.set(event, q);
+    q.items.push({ time: new Date().toISOString(), ...row }); queue.set(event, q);
     q.timer ??= setTimeout(() => flush(event), WAIT_MS).unref();
   } catch (e) { log('notification', 'not queued:', why(e)); }
 }

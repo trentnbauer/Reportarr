@@ -214,7 +214,7 @@ const context = (c, s) => ({
     // later: files of this report the hourly limit did not leave room for. They wait here, slimmed down to what swap() needs,
     // and carry on as the limit resets (see resume()); the report is not finished until they are all through.
     const slim = ({ a, ep, movie, ...h }) => ({ ...h, arr: a.name, ...(ep && { ep: { id: ep.id } }), ...(movie && { movie: { id: movie.id } }) });
-    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, user: report.user, items,
+    (s.pending ??= []).push({ reportId: report.id, kind: report.kind, source: report.source, ref: report.issue?.id, issueType: report.issue?.issueType, reportedAt: report.issue?.createdAt, user: report.user, items,
       backlog: later.map(slim), ...(later.length ? { hadBacklog: true } : {}), since: new Date().toISOString() });
     writeJson(stateFile(), s);
   },
