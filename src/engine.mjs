@@ -17,7 +17,7 @@ const writeJson = (f, v) => { fs.mkdirSync(DATA_DIR, { recursive: true }); write
 export const stateFile = () => dataFile('state.json');
 export const changesFile = () => dataFile('changes.json');
 
-export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0 };
+export const status = { lastPoll: null, lastError: null, historic: 0, replacing: 0, downloads: [] };
 // Last known state of each configured thing, keyed source:NAME, arr:NAME or client:NAME. Sources are updated by every poll,
 // *arr instances every few minutes, download clients only when you press Test (logging in over and over can get you banned).
 export const health = {};
@@ -157,6 +157,14 @@ const STAGES = ['replaced', 'downloading', 'downloaded', 'imported', 'available'
 const reached = (it, st) => STAGES.indexOf(it.stage ?? 'replaced') >= STAGES.indexOf(st);
 const downloadDone = (q) => q.status === 'completed' || /^import/i.test(q.trackedDownloadState ?? '') || (q.size > 0 && q.sizeleft === 0);
 
+// How far a queue item has got, as the UI shows it. The arr gives timeleft as [d.]hh:mm:ss and, when it knows, an estimated finish.
+const parseLeft = (s) => { const m = /^(?:(\d+)\.)?(\d+):(\d+):(\d+)/.exec(s ?? ''); return m ? (((+(m[1] ?? 0)) * 24 + +m[2]) * 3600 + +m[3] * 60 + +m[4]) * 1000 : undefined; };
+const progressOf = (q) => {
+  const left = parseLeft(q.timeleft);
+  return { pct: q.size > 0 ? Math.round((100 * (q.size - q.sizeleft)) / q.size) : 0, state: q.status, release: q.title, client: q.downloadClient,
+    eta: q.estimatedCompletionTime ?? (left === undefined ? undefined : new Date(Date.now() + left).toISOString()) };
+};
+
 // Moves the items on as far as they have got; true when every one is available.
 async function advance(c, p, base, queues) {
   const plex = c.sources.find((x) => x.kind === 'plex' && SOURCES.plex.isConfigured(x));
@@ -167,6 +175,7 @@ async function advance(c, p, base, queues) {
     if (!reached(it, 'imported')) {
       const x = await arr(a, 'GET', it.check);
       if (x?.hasFile) {
+        delete it.progress; // it arrived
         if (!reached(it, 'downloaded')) row('downloaded', 'download finished (seen when it was imported)');
         it.newFile = fileName(x.movieFile?.path ?? x.episodeFile?.path);
         it.importedAt = Date.now();
@@ -174,6 +183,7 @@ async function advance(c, p, base, queues) {
         row('imported', `${a.kind === 'radarr' ? 'Radarr' : 'Sonarr'} imported the new file`);
       } else {
         const q = (queues[a.name] ??= (await arr(a, 'GET', '/queue?pageSize=200')).records).find((r) => Object.entries(it.match).every(([k, v]) => r[k] === v));
+        if (q) it.progress = progressOf(q);
         if (q && !reached(it, 'downloading')) { it.stage = 'downloading'; row('downloading', `${q.title}${q.downloadClient ? ` via ${q.downloadClient}` : ''}`); }
         if (q && !reached(it, 'downloaded') && downloadDone(q)) { it.stage = 'downloaded'; row('downloaded', 'download finished, waiting for import'); }
       }
@@ -367,6 +377,8 @@ export async function poll() {
   for (const id of retries.splice(0)) await retry(c, s, nodes, id);
   await checkPending(c, s);
   status.replacing = s.pending.length;
+  // what the By report view shows for downloads in flight: one entry per item being waited for
+  status.downloads = s.pending.flatMap((p) => p.items.map((it) => ({ reportId: p.reportId, title: it.title, instance: it.arr, stage: it.stage ?? 'replaced', ...it.progress, pct: reached(it, 'downloaded') ? 100 : it.progress?.pct ?? 0 })));
   const rows = readJson(changesFile(), []);
   if (clearFailures(rows)) writeJson(changesFile(), rows);
   writeJson(stateFile(), s);
