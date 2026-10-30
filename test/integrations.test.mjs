@@ -43,7 +43,7 @@ test('the UI is told every kind, with its label, fields and defaults, so it hard
   assert.deepEqual(Object.keys(meta.subtitles), ['bazarr']);
   assert.deepEqual(Object.keys(meta.notifications), ['discord', 'smtp']);
   assert.deepEqual(Object.keys(meta.sources), ['plex', 'seerr']);
-  assert.deepEqual(Object.keys(meta.arrs), ['sonarr', 'radarr', 'lidarr']);
+  assert.deepEqual(Object.keys(meta.arrs), ['sonarr', 'radarr', 'lidarr', 'whisparr']);
   assert.deepEqual(Object.keys(meta.clients), ['qbittorrent', 'sabnzbd']);
   for (const kinds of Object.values(meta)) for (const [k, m] of Object.entries(kinds)) assert.ok(typeof m.label === 'string' && m.label, `${k} has a name to show`);
   assert.equal(meta.sources.seerr.switches[0].name, 'resolve');
