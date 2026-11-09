@@ -523,14 +523,18 @@ export async function poll() {
   return errors.join('; ');
 }
 
-let lastNotified = null;
+let lastNotified = null, lastError = null, errorStreak = 0;
+const POLL_ALERT_AFTER = 3;
 
 // Poll forever; the UI's "action existing reports" button wakes it early.
 export async function run() {
   for (;;) {
     await poll().then((partial) => { status.lastError = partial || null; if (partial) log('poll error', partial); }, (e) => { status.lastError = e.message; log('poll error', e.message); });
-    if (status.lastError && status.lastError !== lastNotified) notifyRow({ status: 'error', source: 'Reportarr', detail: `Polling hit a problem: ${status.lastError}` }); // once per distinct problem, not every minute
-    lastNotified = status.lastError;
+    errorStreak = status.lastError && status.lastError === lastError ? errorStreak + 1 : status.lastError ? 1 : 0;
+    lastError = status.lastError;
+    // a blip (one "fetch failed") is not worth an email: only a problem seen on POLL_ALERT_AFTER polls in a row, then once until it changes or clears
+    if (errorStreak >= POLL_ALERT_AFTER && status.lastError !== lastNotified) notifyRow({ status: 'error', source: 'Reportarr', detail: `Polling hit a problem: ${status.lastError} (${errorStreak} polls in a row)` });
+    if (errorStreak >= POLL_ALERT_AFTER || !status.lastError) lastNotified = status.lastError;
     status.lastPoll = new Date().toISOString();
     await new Promise((r) => { wake = r; setTimeout(r, getConfig().pollSeconds * 1000); });
   }
