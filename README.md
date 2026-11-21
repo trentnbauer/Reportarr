@@ -8,25 +8,26 @@ When a user uses Plex's **Report an issue** (on any of your Plex servers, or an 
 
 > **Built by Claude.** This app was written by [Claude](https://claude.com/claude-code) (Anthropic's AI coding assistant) working with the repository owner, and has been tested against a real Plex, Sonarr, Radarr, qBittorrent and SABnzbd setup. Treat it like any young project: start in dry-run mode, read the code, and keep backups of anything you can't re-download.
 
+![Activity tab, By report view](docs/screenshots/activity.png)
+
 ## What it does
 
-1. Polls Plex's community API for **Reported Issues** on your server (the same data the Plex web app shows), and optionally your Overseerr/Seerr's open issues. Neither has a webhook for this, so it polls every 60 seconds by default.
-2. For each **new** report, resolves the reported item to its file, then to the Sonarr/Radarr instance that owns that exact file. Multiple instances (for example 1080p and 4K) are supported, and so is music through Lidarr.
-3. Deletes the file, marks the grabbed release as failed (which blocklists it), and starts a search for a replacement.
-4. Optionally moves the replacement to the top of the qBittorrent or SABnzbd queue.
-5. Shows every action, and your settings, in a small web UI on port 8080. Reports that were already open when Reportarr first started are left alone, but a button in the UI can action them (or dry-run them) when you want.
+1. Polls Plex's **Reported Issues** on every Plex server you add, and optionally the open issues on your Overseerr/Seerr instances (every 60 seconds by default; neither has a webhook for this).
+2. Finds the reported file and the Sonarr, Radarr, Lidarr or Whisparr instance that owns it (several instances, such as 1080p and 4K, are fine).
+3. Deletes the file, blocklists the release it came from, and searches again.
+4. Optionally moves the replacement to the top of the qBittorrent or SABnzbd queue, fixes subtitle reports through Bazarr, and tells you (and the reporter) on Discord or by email.
+5. Follows each report until the new file is in Plex, then resolves the Seerr issue.
 
 The report text is ignored on purpose: any report on a file means "replace this file".
 
-### Safety
+## Safety
 
 - **Dry run is on by default.** Nothing is deleted until you set `DRY_RUN=false`.
-- **Existing reports are never acted on.** On first start, everything already reported is recorded as seen. Only reports created after that are handled.
-- An **hourly limit** (`MAX_PER_HOUR`, default 10) limits how much one bad hour of reports can delete. It counts each episode, movie or album really replaced (dry runs don't count), so an Overseerr issue on a 10-episode season uses 10. When the limit is reached Reportarr pauses and carries on when the hour turns over (the count restarts at the top of each hour, UTC): reports that arrive meanwhile wait unseen, and a report bigger than one hour's limit, a whole series for example, is replaced in chunks, the rest of its files waiting until the next hour. Its issue is resolved only once all of it is back. (`MAX_PER_DAY` is no longer used; Reportarr logs a warning if it is still set.)
-- A **per-user daily limit** (`MAX_PER_USER_PER_DAY`, default 5) stops one reporter from using up everyone's allowance: it counts what Reportarr replaces for each Overseerr/Seerr reporter (by who made the issue) and, once they reach it, **holds** their other reports until tomorrow. A report that goes over it part-way is replaced up to the limit and the rest waits. The user is told about once a day (a notification, see below), and a held report has an **Override limit** button in the log and in its By report timeline, which lets that report through now (and the **Held** filter lists them). The status tile has the same button for the hourly limit when it is reached (it lifts the limit for the rest of that hour). Both limits apply together.
-- A failed row in the activity table has a **Retry** button. If only the queue-priority step failed, Retry redoes just that step, so it never deletes the new download.
-- Duplicate reports for the same file are handled once.
-- Plex can't close or delete reports, so Reportarr keeps its own record of handled ones in `/data/state.json`. Reports stay visible in Plex.
+- **Reports that existed before Reportarr started are never acted on** automatically (a button in the UI can action them).
+- An **hourly limit** (`MAX_PER_HOUR`, default 10) and a **per-user daily limit** (`MAX_PER_USER_PER_DAY`, default 5) cap how much bad reports can delete.
+- **Set `UI_PASSWORD`.** Without it, anyone who can reach the page can change settings and trigger deletions.
+
+More in [Safety and limits](docs/Safety-and-limits.md) and [Security and limitations](docs/Security-and-limitations.md).
 
 ## Install
 
@@ -46,184 +47,20 @@ volumes:
   data:
 ```
 
-This is [`docker-compose.yml`](docker-compose.yml). All settings live in a `.env` file next to it, and every variable in it reaches the container, so adding another Sonarr or Radarr never needs a change to the compose file. Copy [`.env.example`](.env.example) to `.env` and fill it in. You can also skip the file, start the container and configure everything in the web UI, then use its **Download .env** button to get the same settings as a `.env` file to run from compose.
+Copy [`.env.example`](.env.example) to `.env` next to [`docker-compose.yml`](docker-compose.yml) and fill it in, or skip it and set everything up in the web UI (its **Download .env** button exports your settings later). Open `http://<host>:8080`, watch the activity in dry run for a while, then set `DRY_RUN=false`.
 
-Open `http://<host>:8080` (it has a light/dark/auto theme toggle), watch the **Changes** table in dry-run for a while, then set `DRY_RUN=false`.
+## Screenshots
 
-## Configuration
-
-Everything can be set with environment variables (the `.env` file), in the web UI, or both. **A value set in the environment wins and shows as read-only in the UI.** UI changes are stored in `/data/config.json` and apply on the next poll.
-
-**Instances and download clients mix.** Sonarr, Radarr and Lidarr instances (and download clients) defined in the environment are shown read-only with an `env` badge, and you can still add more in the UI with the **Add Sonarr / Add Radarr / Add Lidarr** buttons. The two lists are merged: the environment's come first, and the ones you add are saved in `/data/config.json` next to them. Names must be unique; a name already used by an environment instance is refused. Removing a row you added only removes that row.
-
-| Variable | Default | Purpose |
+| Log view | Settings | Dark mode |
 |---|---|---|
-| `PLEX_URL`, `PLEX_KEY` | | A Plex server and its owner's token (needed to read reports). `PLEX_TOKEN` also works for the key. For more servers number them: `PLEX_2_URL`, `PLEX_2_KEY`, `PLEX_2_NAME`, `PLEX_3_*`, and so on, as many as you have. |
-| `SONARR_1_URL`, `SONARR_1_KEY`, `RADARR_1_URL`, `RADARR_1_KEY`, `LIDARR_1_URL`, `LIDARR_1_KEY`, `WHISPARR_1_URL`, `WHISPARR_1_KEY` | | Your Sonarr, Radarr, Lidarr (music) and Whisparr instances. Number them 1, 2, 3, and so on, as many as you have (`SONARR_2_URL`, `RADARR_3_KEY`, `LIDARR_2_URL`, ...). Include any URL base path. `SONARR_1_NAME` optionally sets the display name (default `sonarr-1`). Unnumbered `SONARR_URL`/`SONARR_KEY` and the older `ARRS` JSON list also still work. |
-| `OVERSEERR_URL`, `OVERSEERR_KEY` | | An Overseerr/Seerr and its API key (Settings, General). Leave blank to skip Overseerr. More instances: `OVERSEERR_2_URL`, `OVERSEERR_2_KEY`, `OVERSEERR_2_NAME`, and so on. |
-| `OVERSEERR_ISSUE_TYPES`, `OVERSEERR_2_ISSUE_TYPES`, ... | `video,audio,subtitles,other` | Which issue types replace the file: `video`, `audio`, `subtitles`, `other`. |
-| `OVERSEERR_WHOLE_SERIES`, `OVERSEERR_2_WHOLE_SERIES`, ... | `true` | An issue on a series that names no season replaces every episode with a file. Set `false` to close those with a note asking for the particular episode instead. A big series is replaced over several hours (see the hourly limit). |
-| `OVERSEERR_PUBLIC_URL`, `OVERSEERR_2_PUBLIC_URL`, ... | | The address people use for Seerr, for the **View your report** link in emails. Blank: Reportarr reads Seerr's own **Application URL** (Settings, General, needs an admin API key) at most once an hour, and falls back to `OVERSEERR_URL` only if neither is set. |
-| `OVERSEERR_RESOLVE`, `OVERSEERR_2_RESOLVE`, ... | `true` | Comment on the Overseerr issue after replacing, and resolve it once the new file is imported. Set `false` to leave the issue alone. |
-| `BAZARR_1_URL`, `BAZARR_1_KEY`, `BAZARR_1_NAME` | | A Bazarr, to fix subtitle issues (see Subtitles below). Use its URL including any base path (`http://bazarr:6767/bazarr`) and the API key from Settings, General. Number more: `BAZARR_2_URL`, ... |
-| `DISCORD_WEBHOOK`, `DISCORD_USERNAME`, `DISCORD_EVENTS` | | A Discord channel webhook (Server Settings, Integrations, Webhooks), an optional bot name (default Reportarr), and which events it hears about. More channels: `DISCORD_2_WEBHOOK`, `DISCORD_2_USERNAME`, `DISCORD_2_EVENTS`, `DISCORD_2_NAME`, and so on. |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO`, `SMTP_TLS`, `SMTP_EVENTS` | port `587`, TLS `true` | Email through an SMTP server. `SMTP_TO` takes several addresses, comma-separated. TLS means implicit TLS on port 465 and STARTTLS on any other port; `SMTP_TLS=false` sends without it. More: `SMTP_2_HOST`, `SMTP_2_TO`, ... |
-| `SMTP_TO_REPORTER`, `SMTP_2_TO_REPORTER`, ... | `false` | `true` also emails the person who made an Overseerr/Seerr report when it is completed (resolved, denied or skipped), with the reason. See Notifications. |
-| `SMTP_TEMPLATE`, `SMTP_2_TEMPLATE`, ... | | A common provider, so only the login is needed: `gmail`, `outlook`, `yahoo`, `icloud`, `fastmail`, `zoho`, `proton`, `sendgrid`, `mailgun`, `brevo`, `ses` or `relay`. It fills in `SMTP_HOST`, `SMTP_PORT` and `SMTP_TLS` (anything you set yourself wins). `SMTP_TEMPLATE=gmail` with `SMTP_USERNAME`, `SMTP_PASSWORD` (an App Password), `SMTP_FROM` and `SMTP_TO` is a complete setup. |
-| `DISCORD_EVENTS`, `SMTP_EVENTS`, `DISCORD_2_EVENTS`, ... | all four | Comma-separated events that channel is told about: `replaced`, `failed`, `resolved`, `cap`. Unset means all of them. |
-| `DRY_RUN` | `true` | Log what would happen without deleting anything. |
-| `POLL_SECONDS` | `60` | How often to check for new reports. |
-| `MAX_PER_USER_PER_DAY` | `5` | Maximum replacements per person per day (the local day), for Overseerr/Seerr issues, counted the same way. `0` turns it off. A person over their limit has their reports **held** until tomorrow, or until you press Override. Plex reports name no user, so only the hourly limit applies to them. |
-| `SERVER_NAME` | | A name for this server (for example `latte`), shown on the emails Reportarr sends: in the subject (`[Reportarr - latte] ...`) and the sign-off ("Reportarr (automated system) on latte"), so you can tell servers apart. Also under App settings. |
-| `MAX_PER_HOUR` | `10` | Maximum replacements per hour: each episode, movie or album counts as one. When it is reached Reportarr pauses and carries on when the hour turns over. |
-| `WEB_UI` | `8080` | Host port for the web UI (compose). |
-| `UI_PORT` | `8080` | Web UI port inside the container. |
-| `BASE_URL` | | For a reverse proxy that serves Reportarr under a path: `/reportarr`, or the full public URL `https://media.example.com/reportarr`. See below. |
-| `UI_USERNAME` | | Username for the UI. If blank, any username is accepted (only the password is checked). Has no effect without `UI_PASSWORD`. |
-| `UI_PASSWORD` | | HTTP basic auth password for the UI. **Set this.** If it is blank there is no login at all: the page just loads, with a warning banner, but only at an IP address or a LAN name (`nas`, `nas.local`, `.lan`, `.home.arpa`, `.internal`) or the host in `BASE_URL`, so a website can't reach it through DNS rebinding. |
-| `HIDE_LOGIN_WARNING` | `false` | Hide the "No login is set" banner in the web UI (also a switch under App settings). Only matters when `UI_PASSWORD` is not set. |
-| `DATA_DIR` | `/data` | Where state, config and the change log live. |
-| `CLIENTS` | | JSON list of download clients for queue priority: `{"name","kind":"qbittorrent"\|"sabnzbd","url","username","password","apiKey"}`. Supports any number of each. |
-| `QBIT_URL`, `QBIT_USERNAME`, `QBIT_PASSWORD` | | One qBittorrent, for setups with one. Shown as a read-only "default" download client, used when no other client matches by address. |
-| `SAB_URL`, `SAB_API_KEY` | | One SABnzbd, the same way. |
+| ![Log view with filters](docs/screenshots/log.png) | ![*arr suite settings with Test buttons](docs/screenshots/arr.png) | ![Activity tab in dark mode](docs/screenshots/dark.png) |
 
-### Behind a reverse proxy, under a path
+## Documentation
 
-Reportarr works at `https://media.example.com/reportarr` as well as at its own port. The page works out where it is mounted from the URL it was loaded at, and the server accepts the path prefix whether or not your proxy strips it, so the simplest setup needs no setting at all. Setting `BASE_URL` makes it explicit and adds two things:
-
-- `/reportarr` (no trailing slash) is redirected to `/reportarr/`, which matters if your proxy passes the prefix through.
-- If you give the full URL (`BASE_URL=https://media.example.com/reportarr`), the browser's `Origin` for that host is accepted when saving settings. Saving settings is checked against the `Host` the app sees, which behind a proxy is often the internal one; the app also accepts `X-Forwarded-Host`, so either set `BASE_URL` to the full URL or have the proxy send that header.
-
-Examples (adapt the container name and port; I have only tested these shapes against a small test proxy, not against nginx, Caddy or Traefik themselves):
-
-```nginx
-location = /reportarr { return 308 /reportarr/; }
-location /reportarr/ {
-    proxy_pass http://reportarr:8080/;          # the trailing slash strips the prefix
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Host $host;
-}
-```
-
-```caddy
-media.example.com {
-    redir /reportarr /reportarr/
-    handle_path /reportarr/* {                   # strips the prefix
-        reverse_proxy reportarr:8080
-    }
-}
-```
-
-If your proxy does not strip the prefix (for example `reverse_proxy /reportarr/* reportarr:8080` in Caddy), that works too; set `BASE_URL=https://media.example.com/reportarr`. The login, if you set one, is HTTP basic auth, which proxies pass through unchanged. Keep it behind TLS.
-
-### The web UI
-
-The page has six tabs. **Activity** shows whether polling is healthy, how many replacements happened this hour out of your hourly limit, and when it resets, a coloured dot for every source, \*arr instance, download client and notification channel, and the list of changes, as a **Log** (filter by Replacing, Replaced, Resolved, Dry run, Skipped or Failed) or **By report**, one card per report with its progress through seven steps; both can be searched by title, file name or report ID, and **Skipped reports are closed, not left open.** A Seerr report Reportarr cannot act on because the title has no file in Sonarr/Radarr is closed with a note ("No file was found for this title..."), like a whole-series report with `OVERSEERR_WHOLE_SERIES=false` is ("Report the particular episode"). On every poll Reportarr also tidies up the open Seerr issues *it* skipped earlier (older versions left them open): up to 10 a poll, each tried once a day, a "no file" one only after looking again in case the library has it now (then it is handled normally), a whole-series one only when `OVERSEERR_WHOLE_SERIES=false`, and never in a dry run or with `OVERSEERR_RESOLVE=false`. The reporter is not emailed for these old ones. **Hide completed** (remembered in the browser) leaves out everything that is done: resolved, or skipped or denied **and closed in Seerr**. **A Seerr report is not completed until its Seerr issue is closed**: whatever Reportarr decided (resolved, skipped or denied), while its issue is open in Seerr, or has been reopened by the reporter, it shows as **Open in Seerr** with Reportarr's decision beside it, and stays in the list (Reportarr reads which issues are open on every poll). By report is the default view, and your last choice is remembered. A resolved report shows all seven steps as done. While a replacement downloads, its report shows a progress bar and an ETA (from Sonarr's or Radarr's queue, refreshed each poll); open the report to see each episode's progress. **App settings**, **Sources** (Plex servers and Overseerr/Seerr instances), **\*arr suite**, **Download clients** and **Notifications** hold the settings, one card per instance, with a sticky **Save** bar that warns you about unsaved changes. Sources and \*arr instances are checked automatically (sources on every poll, \*arr instances every few minutes); download clients and Bazarr are checked at startup and every 10 minutes, and not again after a refused login until their address or credentials change, because repeated bad logins can get you banned; notification channels only when you press Test, because that sends a message. Your theme choice (auto, dark, light) is remembered, and the tab you are on is kept in the URL.
-
-**Several Plex servers.** Each Plex source takes only the reports for its own server (reports name the server they are about, and one Plex account can own several), so two servers on one account, or servers on different accounts, each get their own reports. Each Overseerr/Seerr instance is polled separately, and issue numbers may repeat between instances.
-
-### Test buttons
-
-Each card has a **Test** button: Plex, Overseerr/Seerr, every Sonarr/Radarr/Lidarr/Whisparr instance, every download client and every notification channel. It checks the values currently in the card, so you can test before saving, and a blank secret uses the one you saved. A check makes the same kind of call the app makes (for example it confirms the Plex token can read reports, that an address really is Sonarr and not Radarr, and that the SABnzbd key is the full one) and times out after 10 seconds. Results never show keys or passwords. A test only reads; it never changes anything in the service. The one exception is a notification channel, whose test posts a real test message.
-
-### Failures do not pile up
-
-A failed row (the **Failed** filter and its count) clears itself: when the same report later gets through (its file is replaced; for a queue priority, the download is moved or arrives), when you press **Retry** on it (the retry writes its own rows, and a new failed row if it fails again), or after 7 days. Anything else has a **Dismiss** button, and **Dismiss N failed** clears them all. A dismissed row stays in the log, greyed, with the reason, but no longer counts as a failure and no longer turns a report red in **By report**. Failed rows never hold up a report: a failed queue priority never changes its state (the download goes ahead anyway), any other failure only shows until the report moves on, and once a report is resolved it reads **Resolved** whatever failed rows it has. Those rows stay in its timeline.
-
-### Subtitles (Bazarr)
-
-A subtitle problem is not fixed by replacing the video. Add Bazarr (the **Subtitles** tab, or `BAZARR_*`) and a Seerr issue of type *subtitles* is handled by it: Reportarr finds the title in Sonarr/Radarr, asks Bazarr for that item's subtitles, **deletes the subtitle files** (a subtitle inside the video cannot be deleted and is left), asks Bazarr to search again for the languages then missing, comments on the issue and resolves it. The video is not touched. Each item counts toward the hourly limit like a replacement, so a series-wide subtitle report is done in chunks the same way. Bazarr knows items by their Sonarr/Radarr ids, so it has to be connected to the same Sonarr/Radarr that Reportarr found the title in; an item Bazarr does not know is skipped. Bazarr queues the search and answers at once, so Reportarr says it *asked* Bazarr to search, and the issue is resolved without waiting for the new subtitle (if it is still wrong, report it again). Without a Bazarr set up, subtitle issues are **Denied** and left open for someone to handle. To turn them off, take `subtitles` out of the issue types.
-
-### Notifications
-
-The **Notifications** tab (or the `DISCORD_*` and `SMTP_*` variables) sends a message to Discord and/or email when something happens. Each channel picks its own events: **Replacements** (a file was deleted and searched again), **Failures** (a report or a connection failed; a queue priority that did not work is not counted), **Resolved** (the new file is in Plex and the issue was resolved) and **Hourly limit reached** (once an hour) and **User limit reached** (once a day per person: someone hit their daily limit and their reports are held). Events that arrive close together are sent as one message, so a replaced season is one Discord post or one email, not twelve. Messages are signed "Reportarr (automated system)". Discord only accepts a real `discord.com` webhook address, and the message cannot ping anyone. Email needs no extra software: Reportarr speaks SMTP itself, with `AUTH PLAIN` when a username is set. On the email card, the **Template** list fills in a common provider's host, port and TLS (Gmail, Outlook / Microsoft 365, Yahoo, iCloud, Fastmail, Zoho, Proton, SendGrid, Mailgun, Brevo, Amazon SES, or a local relay) and says what its login needs, such as a Gmail App Password; you still enter the username, password and addresses. The templates are written from the providers' documentation and may drift, so check yours (and the choice is saved with the channel and exported to `.env` as `SMTP_N_TEMPLATE`). **Emailing the reporter.** An email channel with **Email the reporter** on (`SMTP_TO_REPORTER=true`) also writes to the person who made an Overseerr/Seerr report, at the address Seerr has for them, when their report is completed: **Resolved** ("The file was replaced and the new one is ready", or "The subtitles were refreshed"), **Denied** (for example "Series report. Report a season or 1 file.", or that subtitle problems are not fixed automatically) or **Skipped** (no file was found for the title). The email says the outcome and the reason and links to their Seerr issue; it is one email per report and goes to that person only, and not in a dry run. Plex reports name no user, so they cannot be emailed. The reporter's address is used to send the email and is not kept in the log. A connection problem while polling (for example Plex unreachable) is only sent after 3 polls in a row hit the same problem, so a one-off blip sends nothing. **Alerts are logged.** Every alert Reportarr sends (Discord, email, and the email to a reporter) gets a row in the log, **Alert** or **Alert failed** with the reason, naming the channels it went through; it is filed under the report it was about, so it shows in that report's timeline in **By report** (the **Alerts** filter lists them). The email to a reporter says who was told and what, never their address. A report waiting on the hourly limit, or held by a user's limit, also says so in its own timeline.
-
-**HTML emails.** Every email is sent as multipart: a plain-text version and an HTML one built from two templates in `src/templates/` (`notification.html` for the addresses in `SMTP_TO`, one row per batched event; `reporter.html` for the person who made a report), with the server name, a LIVE or DRY RUN badge, status colours that match the web UI, light and dark mode, and a button to open Reportarr (when `BASE_URL` is a full address) or the reporter's Seerr issue. To restyle them, copy a template, edit it, and put your copies in a folder you mount into the container and name in `EMAIL_TEMPLATE_DIR`; a file missing there falls back to the built-in one. The placeholders are Mustache-style (`{{title}}`, `{{#events}}...{{/events}}`) and listed in the comment at the top of each file; filled-in values are HTML-escaped and never read as placeholders themselves. A failing channel is logged and skipped; it never holds up a replacement. **Test** sends a real message.
-
-### Moving UI settings into compose
-
-Once you have configured things in the web UI, **Download .env** (below the Save button, shown when you have saved settings in the UI) downloads your settings as `reportarr.env` (browsers drop the leading dot, so rename it to `.env`): numbered `SONARR_N_*` and `RADARR_N_*` instances, `PLEX_KEY`, Overseerr, queue settings and so on. It contains your API keys and passwords, so keep it private and never commit it. Put it next to `docker-compose.yml` and restart; from then on the settings come from the file and show as read-only in the UI. `UI_USERNAME` and `UI_PASSWORD` are never stored by the UI, so they are left blank in the file for you to fill in.
-
-### Why the qBittorrent and SABnzbd settings exist
-
-Sonarr and Radarr don't expose their download clients' passwords or full API keys, so Reportarr can't borrow them. Without `QBIT_PASSWORD` / `SAB_API_KEY` the replacement is still searched and downloaded, it just isn't moved to the top of the queue (the Changes table says so). With several qBittorrent or SABnzbd instances, list each in `CLIENTS` (or the **Download clients** table in the UI). Each queued replacement is matched to its client by the host and port Sonarr/Radarr use for it, falling back to the client's name, so the right instance is always the one that gets the call. For SABnzbd use the **full** API key, not the NZB key. qBittorrent needs torrent queueing enabled for priority to apply.
-
-## How it matches a report to a file
-
-**Plex.** A report holds a Plex item reference. Reportarr asks Plex for that item's file name and IDs (TVDB for series, TMDB for movies), looks the item up in each Sonarr/Radarr instance of the right kind, and acts on the instance whose file name matches. If no instance owns the file, or the item is already gone from Plex, the report is logged as skipped.
-
-**Whisparr.** Add it as an *arr instance (`WHISPARR_N_*`, or the **\*arr suite** tab). Only Plex reports reach it (Overseerr/Seerr does not do adult titles). Plex's adult libraries carry no TVDB or TMDB ids, so the reported file is found by its **name**: in Whisparr 3 (movies, built on Radarr) by the file name among the movies, in Whisparr 2 (series and episodes, built on Sonarr) by the series name (Plex's show title) and then the file name among its episodes. Everything after that is the parent app's flow: delete the file, blocklist the release, search again, move the new grab up the queue. Whisparr was written from its API, which is Sonarr's or Radarr's, and has not been run against a real Whisparr: try it in dry run first.
-
-**Plex music.** A reported track is matched to Lidarr by artist name and file name. Lidarr works per album, so the **whole album** is replaced: all of its files are deleted, the release they came from is blocklisted and the album is searched again. That keeps the album one consistent release. Tracks whose artist or file Lidarr does not have are skipped.
-
-**Overseerr/Seerr.** An issue names a title, not a file, so Reportarr looks the title up by TMDB id (movies) or TVDB/TMDB id (series) in every Radarr or Sonarr and replaces the file in each instance that has one (so a 1080p and a 4K copy both go). Movie issues replace the movie file. TV issues replace the reported episode; if the issue names a season but no episode, every episode with a file in that season; an issue against the whole series (no season named) replaces every episode with a file, unless `OVERSEERR_WHOLE_SERIES=false`, in which case Reportarr comments on the issue ("please report the particular episode") and resolves it, so nobody is left waiting (the row is **Denied**, a status of its own next to Skipped, which is for reports Reportarr could not act on, such as no file found; Denied also covers issue types you have not set to be replaced, such as subtitles, which leave the Seerr issue alone, and subtitle issues when no Bazarr is set up) (in a dry run, or with `OVERSEERR_RESOLVE=false`, it leaves the issue alone and the row has a Retry). A report bigger than this hour's limit is replaced in chunks: as many files as the hourly limit allows now, the rest as it resets, and its issue is resolved only when all of it is back (the report shows how many files are still waiting). Issue types not listed in `OVERSEERR_ISSUE_TYPES` (subtitle problems are better fixed by Bazarr). After replacing, Reportarr comments on the issue ("will be resolved once the new file is imported") and follows every replaced file from there, one log row per step: **Reported**, **Replaced** (old file deleted, search started), **Downloading** (in the *arr queue), **Downloaded**, **Imported** (Sonarr/Radarr has the new file), **In Plex** (the Plex source lists the new file; skipped when no Plex source is set up, and after 60 minutes it resolves anyway) and **Resolved**. Only then does it resolve the issue, so Seerr's "issue resolved" notification reaches the reporter when the file is really there. The **By report** view in the web UI groups these rows by report ID with a progress bar per report; the **Replacing** filter counts the issues waiting right now. If nothing is imported within 72 hours the issue is left open and a row says so. The wait is kept in `state.json`, so a restart does not lose it. Every comment Reportarr posts ends with "Reportarr (automated system)". `OVERSEERR_RESOLVE=false` skips the comment and the resolve. Open issues that exist when you first add Overseerr are never actioned automatically; use the button in the web UI for those.
-
-## Security
-
-- **Set `UI_PASSWORD`, and `UI_USERNAME` too.** The UI can change which servers Reportarr talks to, and the app holds your Plex token and the arr API keys. Without a password anyone who can reach the port can use it. Don't expose it to the internet; put it behind a reverse proxy with TLS if you need remote access (basic auth is sent in clear text over plain HTTP).
-- Secrets are never sent to the browser, and `/data/config.json` is written readable only by its owner.
-- Changes to settings must be sent as JSON from the same origin, which stops other websites from changing your settings through your browser.
-- The container runs as root so that existing `/data` volumes keep working. If you prefer, run it with `user: "1000:1000"` and make `./data` writable by that user.
-
-## Limitations
-
-- **Plex reports can't be closed or deleted.** Plex has no way to do that, so they stay open in Plex (Overseerr issues are resolved). Reportarr could post a reply on a Plex report; it doesn't do that yet.
-- Only the 100 newest open Overseerr issues are read each poll.
-- Uses an unofficial Plex endpoint (`community.plex.tv`), the same one the Plex web app uses. Plex could change it without notice.
-- A replacement may be the same bad release again if Sonarr/Radarr don't match it to the blocklist entry. Check the Changes table after the first few real runs.
-- Supported apps are Sonarr, Radarr, Lidarr and Whisparr. **Readarr is not supported**: the project has been retired, Plex has no ebook library to report on, and Overseerr does not handle books, so there is nothing to drive it. Whisparr is not supported either.
-- Lidarr support was verified against a real Lidarr and a real Plex music library for matching (dry run), but the delete, blocklist and search calls were only exercised against a test server. Run it in dry run first.
-- One bad report from one user deletes a file. That is the design, so mind who can report on your server and keep `MAX_PER_HOUR` sensible.
-
-## Versions
-
-Each image build gets a version: `0.1.<run number>` for builds from `main`, or the tag for tagged releases (`v1.4.0` becomes `1.4.0`). It is shown in the web UI header, set as the image's `org.opencontainers.image.version` label, and added as an image tag next to `latest`. Bump the major.minor part with `VERSION_BASE` in `.github/workflows/docker.yml`.
-
-## Project layout
-
-Each app Reportarr talks to is one file in `src/integrations/` that owns everything about it: its environment variables, how its settings are saved and exported, its connection test, its API calls and how it matches a reported file. The rest of the code loops over a registry and has no app-specific branches.
-
-```
-app.mjs                     starts the web UI and the polling loop
-ui.html                     the web UI (no dependencies; draws its cards from what the server says each kind needs)
-src/engine.mjs              the polling loop and the replace flow
-src/server.mjs              the web UI's HTTP server, login, and reverse-proxy handling
-src/config.mjs              settings from the environment and the UI: merge, save, export
-src/checks.mjs              finds the right integration for a Test button
-src/notify.mjs              turns log rows into events and sends them (batched) to the notification channels
-src/util.mjs                small shared helpers
-src/integrations/
-  index.mjs                 the registry: lists every integration
-  plex.mjs  seerr.mjs      report sources
-  arr.mjs                   what Sonarr, Radarr, Lidarr and Whisparr share
-  sonarr.mjs  radarr.mjs  lidarr.mjs  whisparr.mjs
-  qbittorrent.mjs  sabnzbd.mjs   download clients
-  discord.mjs  smtp.mjs    notification channels (events.mjs: the events they share)
-  bazarr.mjs               subtitle manager
-test/                       one test file per area (node --test)
-```
-
-### Adding an integration
-
-Copy the closest existing file, make it declare the same things, and list it in `src/integrations/index.mjs`. `test/integrations.test.mjs` checks that every integration declares what the core relies on:
-
-- everything: `kind`, `label`, `prefix`, `defaultUrl`, `fields` (what the settings card shows), `defaults`, `fromEnv(env)` (your environment variables), `check(args)` and `checkArgs(request, saved)` (the Test button);
-- a **source** (where reports come from): `fetch(source)` returns the open reports, `replace(ctx, report)` handles one, plus `label`, `isConfigured`, `normalize` and `envLines`;
-- an ***arr app**: `plan(hit)` says how to delete, blocklist and search again, and `fromPlex` and/or `fromIssue` find the file a report is about;
-- a **download client**: `implementation` (the name the \*arr gives it) and `prioritize(client, queueItem)`;
-- a **subtitle manager**: `refresh(manager, hit)` fixes one item's subtitles, plus `isConfigured`, `normalize` and `envLines`;
-- a **notification channel**: `send(channel, message)`, `validate`, `normalize`, `envLines`, `isConfigured` and its event switches (it has no URL, so no `defaultUrl`).
-
-The settings page, the `.env` export, the Test button and the Connections strip then pick it up with no other change.
-
-## Development
-
-```sh
-node --test          # unit tests
-DATA_DIR=./data node app.mjs
-```
-
-Plain Node 22, no dependencies, no build step.
+- [Configuration](docs/Configuration.md): every environment variable
+- [Web UI](docs/Web-UI.md), [Notifications](docs/Notifications.md), [Subtitles (Bazarr)](docs/Subtitles.md), [Reverse proxy](docs/Reverse-proxy.md)
+- [How a report is matched to a file](docs/How-matching-works.md)
+- [Development](docs/Development.md): project layout, adding an integration, tests
 
 ## Licence
 
