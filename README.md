@@ -1,3 +1,5 @@
+### This is AI slop
+
 # Reportarr
 
 Automagically fix Plex reports.
