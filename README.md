@@ -27,7 +27,7 @@ The report text is ignored on purpose: any report on a file means "replace this 
 - An **hourly limit** (`MAX_PER_HOUR`, default 10) and a **per-user daily limit** (`MAX_PER_USER_PER_DAY`, default 5) cap how much bad reports can delete.
 - **Set `UI_PASSWORD`.** Without it, anyone who can reach the page can change settings and trigger deletions.
 
-More in [Safety and limits](docs/Safety-and-limits.md) and [Security and limitations](docs/Security-and-limitations.md).
+More in [Safety and limits](https://github.com/trentnbauer/Reportarr/wiki/Safety-and-limits) and [Security and limitations](https://github.com/trentnbauer/Reportarr/wiki/Security-and-limitations).
 
 ## Install
 
@@ -55,12 +55,12 @@ Copy [`.env.example`](.env.example) to `.env` next to [`docker-compose.yml`](doc
 |---|---|---|
 | ![Log view with filters](docs/screenshots/log.png) | ![*arr suite settings with Test buttons](docs/screenshots/arr.png) | ![Activity tab in dark mode](docs/screenshots/dark.png) |
 
-## Documentation
+## Documentation ([wiki](https://github.com/trentnbauer/Reportarr/wiki))
 
-- [Configuration](docs/Configuration.md): every environment variable
-- [Web UI](docs/Web-UI.md), [Notifications](docs/Notifications.md), [Subtitles (Bazarr)](docs/Subtitles.md), [Reverse proxy](docs/Reverse-proxy.md)
-- [How a report is matched to a file](docs/How-matching-works.md)
-- [Development](docs/Development.md): project layout, adding an integration, tests
+- [Configuration](https://github.com/trentnbauer/Reportarr/wiki/Configuration): every environment variable
+- [Web UI](https://github.com/trentnbauer/Reportarr/wiki/Web-UI), [Notifications](https://github.com/trentnbauer/Reportarr/wiki/Notifications), [Subtitles (Bazarr)](https://github.com/trentnbauer/Reportarr/wiki/Subtitles), [Reverse proxy](https://github.com/trentnbauer/Reportarr/wiki/Reverse-proxy)
+- [How a report is matched to a file](https://github.com/trentnbauer/Reportarr/wiki/How-matching-works)
+- [Development](https://github.com/trentnbauer/Reportarr/wiki/Development): project layout, adding an integration, tests
 
 ## Licence
 
